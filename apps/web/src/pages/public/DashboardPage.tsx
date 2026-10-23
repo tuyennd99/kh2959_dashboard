@@ -160,7 +160,7 @@ export function DashboardPage() {
                 Tổng thửa
               </p>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-                {formatNumber(1_846_570)}
+                {formatNumber(1_846_570)} <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
             </div>
             <div className="rounded-xl border bg-card p-4">
@@ -168,7 +168,7 @@ export function DashboardPage() {
                 Đã đối khớp thành công
               </p>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-                {formatNumber(1_295_709)}
+                {formatNumber(1_295_709)} <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
             </div>
             <div className="rounded-xl border bg-card p-4">
@@ -176,7 +176,7 @@ export function DashboardPage() {
                 Chưa khớp, chưa đủ điều kiện
               </p>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-                {formatNumber(550_861)}
+                {formatNumber(550_861)} <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
             </div>
           </div>
@@ -186,9 +186,8 @@ export function DashboardPage() {
             KHỐI 1: SỔ THEO DÕI SẢN LƯỢNG SỐ THỬA HẰNG NGÀY (ĐƯA LÊN TRƯỚC)
            ===================================================================== */}
         <section
-          className={`space-y-4 transition-opacity ${
-            summaryQuery.isFetching ? "opacity-80" : "opacity-100"
-          }`}
+          className={`space-y-4 transition-opacity ${summaryQuery.isFetching ? "opacity-80" : "opacity-100"
+            }`}
         >
           {/* LEDGER PANEL ĐẦU TRANG: Mở trang biết ngay tổng số thửa và từng ngày làm được bao nhiêu */}
           <div className="overflow-hidden rounded-xl border bg-card">
@@ -240,15 +239,15 @@ export function DashboardPage() {
                     <dd className="mt-0.5 text-xs font-medium text-foreground tabular-nums">
                       {summary?.lastSync
                         ? new Date(
-                            summary.lastSync.syncedAt,
-                          ).toLocaleTimeString("vi-VN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          }) +
-                          " " +
-                          new Date(
-                            summary.lastSync.syncedAt,
-                          ).toLocaleDateString("vi-VN")
+                          summary.lastSync.syncedAt,
+                        ).toLocaleTimeString("vi-VN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        }) +
+                        " " +
+                        new Date(
+                          summary.lastSync.syncedAt,
+                        ).toLocaleDateString("vi-VN")
                         : "—"}
                     </dd>
                   </div>
