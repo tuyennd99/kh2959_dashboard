@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+}
+
+enum RecordSource {
+  SHEET_SYNC
+  MANUAL
+  CSV_UPLOAD
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique @db.VarChar(320)
+  password     String   @db.VarChar(255)
+  fullName     String   @db.VarChar(255)
+  role         Role     @default(ADMIN)
+  isActive     Boolean  @default(true)
+  tokenVersion Int      @default(0)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("users")
+}
+
+model FieldDefinition {
+  id         String           @id @default(cuid())
+  code       String           @unique @db.VarChar(100)
+  label      String           @db.VarChar(255)
+  sheetAlias String?          @db.VarChar(255)
+  unit       String           @default("sổ / thửa") @db.VarChar(60)
+  isDefault  Boolean          @default(false)
+  sortOrder  Int              @default(0)
+  createdAt  DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime         @updatedAt @db.Timestamptz(3)
+  records    LandStatRecord[]
+
+  @@index([sortOrder])
+  @@map("field_definitions")
+}
+
+model LandStatRecord {
+  id          String          @id @default(cuid())
+  reportDate  DateTime        @db.Date
+  fieldCode   String          @db.VarChar(100)
+  commune     String          @default("") @db.VarChar(255)
+  bookCount   Int             @default(0)
+  parcelCount Int             @default(0)
+  extraData   Json?
+  source      RecordSource    @default(MANUAL)
+  note        String?         @db.Text
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
+  field       FieldDefinition @relation(fields: [fieldCode], references: [code], onDelete: Cascade)
+
+  @@unique([reportDate, fieldCode, commune])
+  @@index([reportDate])
+  @@index([fieldCode])
+  @@index([commune])
+  @@map("land_stat_records")
+}
+
+model SyncLog {
+  id            String   @id @default(cuid())
+  source        String   @db.VarChar(60)
+  sheetUrl      String?  @db.Text
+  recordsSynced Int      @default(0)
+  status        String   @db.VarChar(30)
+  message       String?  @db.Text
+  syncedAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([syncedAt])
+  @@map("sync_logs")
+}

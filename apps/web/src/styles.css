@@ -1,0 +1,175 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface-1);
+  --color-fg: var(--text-primary);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-body);
+  --font-ui: var(--font-body);
+  --font-brand: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+:root,
+.viz-root {
+  color-scheme: light;
+  --font-display: "Google Sans Flex", "Inter", sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  /* Cool neutral Shadcn surfaces */
+  --surface-page: oklch(99% 0.002 240);
+  --surface-1: oklch(100% 0 0);
+  --surface-2: color-mix(in oklch, var(--text-primary) 2.5%, var(--surface-1));
+  --text-primary: oklch(18% 0.012 250);
+  --text-secondary: oklch(54% 0.012 250);
+  --text-muted: var(--text-secondary);
+  --gridline: oklch(92% 0.005 250);
+  --baseline: color-mix(in oklch, var(--text-primary) 28%, var(--surface-1));
+  --border-strong: color-mix(
+    in oklch,
+    var(--text-primary) 16%,
+    var(--gridline)
+  );
+  --border-hairline: var(--gridline);
+
+  /* Keep categorical chart colors distinct for data comparison */
+  --delta-up-good: #006300;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  /* Shadcn semantic tokens */
+  --background: var(--surface-page);
+  --foreground: var(--text-primary);
+  --card: var(--surface-1);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-1);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--text-primary);
+  --primary-foreground: var(--surface-1);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-secondary);
+  --accent: oklch(58% 0.18 255);
+  --accent-hover: oklch(40% 0.15 255);
+  --accent-soft: color-mix(in oklch, var(--accent) 12%, transparent);
+  --accent-foreground: oklch(98% 0.004 250);
+  --destructive: oklch(56% 0.2 28);
+  --border: var(--gridline);
+  --input: var(--border-strong);
+  --ring: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-page: oklch(13% 0.005 250);
+    --surface-1: oklch(17% 0.005 250);
+    --surface-2: oklch(21% 0.005 250);
+    --text-primary: oklch(93% 0.004 250);
+    --text-secondary: oklch(76% 0.006 250);
+    --text-muted: oklch(65% 0.005 250);
+    --gridline: oklch(28% 0.004 250);
+    --baseline: oklch(40% 0.004 250);
+    --border-strong: oklch(35% 0.004 250);
+    --border-hairline: var(--gridline);
+    --primary-foreground: oklch(18% 0.012 250);
+    --accent-hover: oklch(86% 0.006 250);
+    --delta-up-good: #0ca30c;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.viz-root {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.32;
+  letter-spacing: 0;
+}
+
+h3,
+h4,
+p {
+  font-family: var(--font-body);
+}
+
+/* Ensure interactive elements always display pointer cursor */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[role="tab"]:not([disabled]),
+select:not(:disabled),
+input[type="checkbox"]:not(:disabled),
+input[type="file"]:not(:disabled),
+label[for] {
+  cursor: pointer;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

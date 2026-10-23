@@ -1,0 +1,13 @@
+{
+  "name": "land-dashboard-monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.17.0",
+  "engines": { "node": ">=24.7 <25" },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @land/web --filter @land/api dev",
+    "build": "pnpm --filter @land/web --filter @land/api build",
+    "typecheck": "pnpm --filter @land/web --filter @land/api typecheck",
+    "test": "pnpm --filter @land/api test",
+    "format": "pnpm --filter @land/web --filter @land/api format"
+  }
+}
