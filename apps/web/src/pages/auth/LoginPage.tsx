@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
+import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 import { Lock, LogIn } from "lucide-react";
 import { loginApi } from "../../api";
@@ -16,30 +17,26 @@ import { Label } from "../../components/ui/label";
 import { useSessionStore } from "../../stores/session-store";
 
 export function LoginPage() {
-  const [email, setEmail] = useState("admin@datdai.local");
-  const [password, setPassword] = useState("Admin@123456");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const setSession = useSessionStore((s) => s.setSession);
   const navigate = useNavigate();
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    try {
-      const res = await loginApi({ email, password });
-      setSession(res);
-      await navigate({ to: "/manage" });
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Đăng nhập không thành công",
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  const form = useForm({
+    defaultValues: { email: "", password: "" },
+    onSubmit: async ({ value }) => {
+      setError(null);
+      try {
+        const res = await loginApi(value);
+        setSession(res);
+        await navigate({ to: "/manage" });
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Đăng nhập không thành công",
+        );
+      }
+    },
+  });
 
   return (
     <div className="viz-root min-h-screen bg-background">
@@ -59,7 +56,13 @@ export function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void form.handleSubmit();
+              }}
+              className="space-y-4"
+            >
               {error && (
                 <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
                   {error}
@@ -68,30 +71,48 @@ export function LoginPage() {
 
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email tài khoản</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+                <form.Field name="email">
+                  {(field) => (
+                    <Input
+                      id="email"
+                      type="email"
+                      required
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
+                  )}
+                </form.Field>
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="password">Mật khẩu</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+                <form.Field name="password">
+                  {(field) => (
+                    <Input
+                      id="password"
+                      type="password"
+                      required
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
+                  )}
+                </form.Field>
               </div>
 
-              <Button type="submit" className="w-full gap-2" disabled={loading}>
-                <LogIn className="size-4" />
-                <span>{loading ? "Đang đăng nhập..." : "Đăng nhập"}</span>
-              </Button>
+              <form.Subscribe selector={(state) => state.isSubmitting}>
+                {(isSubmitting) => (
+                  <Button
+                    type="submit"
+                    className="w-full gap-2"
+                    disabled={isSubmitting}
+                  >
+                    <LogIn className="size-4" />
+                    <span>
+                      {isSubmitting ? "Đang đăng nhập..." : "Đăng nhập"}
+                    </span>
+                  </Button>
+                )}
+              </form.Subscribe>
             </form>
           </CardContent>
         </Card>

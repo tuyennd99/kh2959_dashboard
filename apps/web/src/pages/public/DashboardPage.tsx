@@ -23,6 +23,7 @@ import {
   DailyStackedBarChart,
   ExternalStatusProgressCard,
   FieldDistributionCard,
+  WeeklyComparisonLineChart,
   formatFullDate,
   formatNumber,
   formatShortDate,
@@ -31,6 +32,7 @@ import {
 import { TopNav } from "../../components/layout/TopNav";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { DeferredDatePicker } from "../../components/ui/deferred-date-picker";
 import {
@@ -155,30 +157,30 @@ export function DashboardPage() {
             Đối khớp dữ liệu dân cư
           </h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border bg-card p-4">
+            <Card className="p-4">
               <p className="text-xs font-medium text-muted-foreground">
                 Tổng thửa
               </p>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
                 {formatNumber(1_846_570)} <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
-            </div>
-            <div className="rounded-xl border bg-card p-4">
+            </Card>
+            <Card className="p-4">
               <p className="text-xs font-medium text-muted-foreground">
                 Đã đối khớp thành công
               </p>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
                 {formatNumber(1_295_709)} <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
-            </div>
-            <div className="rounded-xl border bg-card p-4">
+            </Card>
+            <Card className="p-4">
               <p className="text-xs font-medium text-muted-foreground">
                 Chưa khớp, chưa đủ điều kiện
               </p>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
                 {formatNumber(550_861)} <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
-            </div>
+            </Card>
           </div>
         </section>
 
@@ -190,10 +192,10 @@ export function DashboardPage() {
             }`}
         >
           {/* LEDGER PANEL ĐẦU TRANG: Mở trang biết ngay tổng số thửa và từng ngày làm được bao nhiêu */}
-          <div className="overflow-hidden rounded-xl border bg-card">
+          <Card className="overflow-hidden">
             <div className="grid grid-cols-1 divide-y lg:grid-cols-12 lg:divide-x lg:divide-y-0">
               {/* Cột trái: Tổng số thửa đã thực hiện (Hero Figure >= 48px, proportional figures) */}
-              <div className="flex flex-col justify-between p-5 sm:p-6 lg:col-span-5">
+              <div className="flex flex-col justify-between p-5 sm:p-6 lg:col-span-5 border-color: var(--border-strong);">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-muted-foreground">
@@ -367,7 +369,7 @@ export function DashboardPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </Card>
 
           {/* 4 THẺ HẠNG MỤC (STAT TILES): Bấm để lọc nhanh từng hạng mục */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -440,7 +442,7 @@ export function DashboardPage() {
           </div>
 
           {/* THANH LỌC CO GIÃN VÀ TỰ XUỐNG DÒNG */}
-          <div className="rounded-xl border bg-card p-4">
+          <Card className="p-4">
             <div className="flex flex-wrap items-end gap-3">
               <DeferredDatePicker
                 label="Từ ngày thực hiện"
@@ -531,11 +533,11 @@ export function DashboardPage() {
                 </Button>
               </div>
             </div>
-          </div>
+          </Card>
 
           {/* BIỂU ĐỒ SẢN LƯỢNG HẰNG NGÀY & CƠ CẤU */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border bg-card p-5 lg:col-span-2">
+            <Card className="p-5 lg:col-span-2">
               <div className="mb-4">
                 <h2 className="text-base font-semibold text-foreground">
                   Biểu đồ sản lượng số thửa thực hiện theo ngày
@@ -545,11 +547,15 @@ export function DashboardPage() {
                   mục trong ngày đó
                 </p>
               </div>
-              <DailyStackedBarChart byDate={byDate} fields={fields} />
-            </div>
+              <DailyStackedBarChart
+                byDate={byDate}
+                fields={fields}
+                onSelectDate={toggleDayFilter}
+              />
+            </Card>
 
             <div className="space-y-4">
-              <div className="rounded-xl border bg-card p-5">
+              <Card className="p-5">
                 <div className="mb-3">
                   <h3 className="text-base font-semibold text-foreground">
                     Tỷ trọng theo hạng mục
@@ -562,9 +568,9 @@ export function DashboardPage() {
                   fields={fields}
                   totalsByField={summary?.totalsByField ?? {}}
                 />
-              </div>
+              </Card>
 
-              <div className="rounded-xl border bg-card p-5">
+              <Card className="p-5">
                 <div className="mb-3">
                   <h3 className="text-base font-semibold text-foreground">
                     Số thửa theo xã
@@ -573,13 +579,33 @@ export function DashboardPage() {
                     Thống kê các xã có ghi nhận dữ liệu riêng
                   </p>
                 </div>
-                <CommuneHorizontalChart byCommune={summary?.byCommune ?? []} />
-              </div>
+                <CommuneHorizontalChart
+                  byCommune={summary?.byCommune ?? []}
+                  selectedCommune={commune}
+                  onSelectCommune={(val) => {
+                    setCommune(val);
+                    setPage(1);
+                  }}
+                />
+              </Card>
             </div>
           </div>
 
+          {/* BIỂU ĐỒ SO SÁNH TIẾN ĐỘ GIỮA CÁC TUẦN */}
+          <Card className="p-5">
+            <div className="mb-4">
+              <h2 className="text-base font-semibold text-foreground">
+                Biểu đồ đường so sánh tiến độ giữa các tuần
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                So sánh khối lượng thực hiện từng ngày (Thứ 2 đến Chủ nhật) giữa tuần này và các tuần trước đó
+              </p>
+            </div>
+            <WeeklyComparisonLineChart byDate={byDate} />
+          </Card>
+
           {/* BẢNG SỐ LIỆU HẰNG NGÀY & CHI TIẾT */}
-          <div className="rounded-xl border bg-card p-5">
+          <Card className="p-5">
             <Tabs defaultValue="daily">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -617,7 +643,7 @@ export function DashboardPage() {
                         >
                           <span className="inline-flex items-center justify-end gap-1.5">
                             <span
-                              className="size-2 shrink-0 rounded-[2px]"
+                              className="size-2 shrink-0 rounded-xs"
                               style={{
                                 backgroundColor: getFieldColorByCode(
                                   f.code,
@@ -794,7 +820,7 @@ export function DashboardPage() {
                 )}
               </TabsContent>
             </Tabs>
-          </div>
+          </Card>
         </section>
 
         {/* =====================================================================
@@ -809,79 +835,73 @@ export function DashboardPage() {
                   Tiến độ chuẩn hóa hồ sơ lưu trữ trực tuyến
                 </h2>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Nguồn đồng bộ: chuanhoa.minhhuub.org
-                {ext?.generated_at
-                  ? ` — cập nhật lúc ${new Date(ext.generated_at).toLocaleString("vi-VN")}`
-                  : ""}
-              </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-secondary p-1">
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-secondary p-1">
+              <button
+                type="button"
+                onClick={() => setBranch("")}
+                className="cursor-pointer rounded-md px-3 py-1 text-xs font-semibold transition-all"
+                style={{
+                  backgroundColor:
+                    branch === "" ? "var(--surface-1)" : "transparent",
+                  color:
+                    branch === ""
+                      ? "var(--text-primary)"
+                      : "var(--text-secondary)",
+                  boxShadow:
+                    branch === ""
+                      ? "0 1px 2px rgba(0, 0, 0, 0.06)"
+                      : undefined,
+                }}
+              >
+                Tất cả chi nhánh
+              </button>
+              {(
+                ext?.branches ?? [
+                  "VPĐKĐĐ KV Hà Quảng",
+                  "VPĐKĐĐ KV Nguyên Bình",
+                ]
+              ).map((b) => (
                 <button
+                  key={b}
                   type="button"
-                  onClick={() => setBranch("")}
+                  onClick={() => setBranch(b)}
                   className="cursor-pointer rounded-md px-3 py-1 text-xs font-semibold transition-all"
                   style={{
                     backgroundColor:
-                      branch === "" ? "var(--surface-1)" : "transparent",
+                      branch === b ? "var(--surface-1)" : "transparent",
                     color:
-                      branch === ""
+                      branch === b
                         ? "var(--text-primary)"
                         : "var(--text-secondary)",
                     boxShadow:
-                      branch === ""
+                      branch === b
                         ? "0 1px 2px rgba(0, 0, 0, 0.06)"
                         : undefined,
                   }}
                 >
-                  Tất cả chi nhánh
+                  {b}
                 </button>
-                {(
-                  ext?.branches ?? [
-                    "VPĐKĐĐ KV Hà Quảng",
-                    "VPĐKĐĐ KV Nguyên Bình",
-                  ]
-                ).map((b) => (
-                  <button
-                    key={b}
-                    type="button"
-                    onClick={() => setBranch(b)}
-                    className="cursor-pointer rounded-md px-3 py-1 text-xs font-semibold transition-all"
-                    style={{
-                      backgroundColor:
-                        branch === b ? "var(--surface-1)" : "transparent",
-                      color:
-                        branch === b
-                          ? "var(--text-primary)"
-                          : "var(--text-secondary)",
-                      boxShadow:
-                        branch === b
-                          ? "0 1px 2px rgba(0, 0, 0, 0.06)"
-                          : undefined,
-                    }}
-                  >
-                    {b}
-                  </button>
-                ))}
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void externalQuery.refetch()}
-                disabled={externalQuery.isFetching}
-              >
-                <RefreshCw
-                  className={`size-3.5 ${externalQuery.isFetching ? "animate-spin" : ""}`}
-                />
-                <span>Làm mới</span>
-              </Button>
+              ))}
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void externalQuery.refetch()}
+              disabled={externalQuery.isFetching}
+            >
+              <RefreshCw
+                className={`size-3.5 ${externalQuery.isFetching ? "animate-spin" : ""}`}
+              />
+              <span>Làm mới</span>
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border bg-card p-4">
+            <Card className="p-4">
               <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
                 <span>Tổng số GCN</span>
                 <CheckCircle2 className="size-4 text-primary" />
@@ -892,9 +912,9 @@ export function DashboardPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 {branch || "Toàn bộ chi nhánh VPĐKĐĐ"}
               </p>
-            </div>
+            </Card>
 
-            <div className="rounded-xl border bg-card p-4">
+            <Card className="p-4">
               <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
                 <span>Tổng số hộp hồ sơ</span>
                 <Archive className="size-4 text-primary" />
@@ -905,9 +925,9 @@ export function DashboardPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 Hộp tài liệu lưu trữ đã quét
               </p>
-            </div>
+            </Card>
 
-            <div className="rounded-xl border bg-card p-4">
+            {/* <div className="rounded-xl border bg-card p-4">
               <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
                 <span>Tệp tài liệu đã chuẩn</span>
                 <FileCheck2 className="size-4 text-primary" />
@@ -937,10 +957,10 @@ export function DashboardPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 Chưa chuẩn: {formatNumber(ext?.folders.chua_chuan ?? 0)}
               </p>
-            </div>
+            </div> */}
           </div>
 
-          {ext && (
+          {/* {ext && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <ExternalStatusProgressCard
                 title="Tỷ lệ chuẩn hóa tệp tài liệu (Files)"
@@ -953,7 +973,7 @@ export function DashboardPage() {
                 stats={ext.folders}
               />
             </div>
-          )}
+          )} */}
         </section>
       </main>
     </div>

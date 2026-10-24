@@ -1,5 +1,6 @@
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import { getLocalTimeZone, parseDate, today } from "@internationalized/date";
+import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "@tanstack/react-router";
 import {
@@ -62,25 +63,52 @@ export function ManagePage() {
   const session = useSessionStore((s) => s.session);
   const queryClient = useQueryClient();
 
-  const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL);
-  const [replaceExisting, setReplaceExisting] = useState(true);
   const [statusMessage, setStatusMessage] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
 
   const todayIso = today(getLocalTimeZone()).toString();
-  const [reportDate, setReportDate] = useState(todayIso);
-  const [fieldCode, setFieldCode] = useState("STANDARDIZED_MAP_SHEETS");
-  const [commune, setCommune] = useState("");
-  const [parcelCount, setParcelCount] = useState("0");
-  const [note, setNote] = useState("");
-
-  const [csvText, setCsvText] = useState("");
-
-  const [newFieldCode, setNewFieldCode] = useState("");
-  const [newFieldLabel, setNewFieldLabel] = useState("");
-  const [newFieldAlias, setNewFieldAlias] = useState("");
+  const syncForm = useForm({
+    defaultValues: { sheetUrl: DEFAULT_SHEET_URL, replaceExisting: true },
+    onSubmit: ({ value }) =>
+      syncMutation.mutate({
+        sheetUrl: value.sheetUrl.trim() || undefined,
+        replaceExisting: value.replaceExisting,
+      }),
+  });
+  const manualForm = useForm({
+    defaultValues: {
+      reportDate: todayIso,
+      fieldCode: "STANDARDIZED_MAP_SHEETS",
+      commune: "",
+      parcelCount: "0",
+      note: "",
+    },
+    onSubmit: ({ value }) =>
+      upsertMutation.mutate({
+        reportDate: value.reportDate,
+        fieldCode: value.fieldCode,
+        commune: value.commune.trim(),
+        bookCount: 0,
+        parcelCount: Number(value.parcelCount) || 0,
+        note: value.note.trim() || undefined,
+      }),
+  });
+  const csvForm = useForm({
+    defaultValues: { csvText: "" },
+    onSubmit: ({ value }) =>
+      csvMutation.mutate({ csvContent: value.csvText, replaceExisting: false }),
+  });
+  const createFieldForm = useForm({
+    defaultValues: { code: "", label: "", alias: "" },
+    onSubmit: ({ value }) =>
+      createFieldMutation.mutate({
+        code: value.code,
+        label: value.label,
+        sheetAlias: value.alias || undefined,
+      }),
+  });
 
   const summaryQuery = useQuery({
     queryKey: ["dashboard-summary", {}],
@@ -102,11 +130,7 @@ export function ManagePage() {
   };
 
   const syncMutation = useMutation({
-    mutationFn: () =>
-      syncGoogleSheetApi({
-        sheetUrl: sheetUrl.trim() || undefined,
-        replaceExisting,
-      }),
+    mutationFn: syncGoogleSheetApi,
     onSuccess: async (log) => {
       setStatusMessage({
         type: "success",
@@ -125,22 +149,14 @@ export function ManagePage() {
   });
 
   const upsertMutation = useMutation({
-    mutationFn: () =>
-      upsertLandRecordApi({
-        reportDate,
-        fieldCode,
-        commune: commune.trim(),
-        bookCount: 0,
-        parcelCount: Number(parcelCount) || 0,
-        note: note.trim() || undefined,
-      }),
+    mutationFn: upsertLandRecordApi,
     onSuccess: async () => {
       setStatusMessage({
         type: "success",
         text: "Đã lưu số thửa thành công.",
       });
-      setParcelCount("0");
-      setNote("");
+      manualForm.setFieldValue("parcelCount", "0");
+      manualForm.setFieldValue("note", "");
       await invalidateAll();
     },
     onError: (err) => {
@@ -152,18 +168,14 @@ export function ManagePage() {
   });
 
   const csvMutation = useMutation({
-    mutationFn: () =>
-      importCsvApi({
-        csvContent: csvText,
-        replaceExisting: false,
-      }),
+    mutationFn: importCsvApi,
     onSuccess: async (log) => {
       setStatusMessage({
         type: "success",
         text:
           log.message || `Đã nhập thành công ${log.recordsSynced} dòng từ CSV.`,
       });
-      setCsvText("");
+      csvForm.setFieldValue("csvText", "");
       await invalidateAll();
     },
     onError: (err) => {
@@ -175,20 +187,13 @@ export function ManagePage() {
   });
 
   const createFieldMutation = useMutation({
-    mutationFn: () =>
-      createFieldDefinitionApi({
-        code: newFieldCode,
-        label: newFieldLabel,
-        sheetAlias: newFieldAlias || undefined,
-      }),
+    mutationFn: createFieldDefinitionApi,
     onSuccess: async (created) => {
       setStatusMessage({
         type: "success",
         text: `Đã thêm trường dữ liệu mới: ${created.label} (${created.code})`,
       });
-      setNewFieldCode("");
-      setNewFieldLabel("");
-      setNewFieldAlias("");
+      createFieldForm.reset();
       await invalidateAll();
     },
     onError: (err) => {
@@ -226,20 +231,10 @@ export function ManagePage() {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
-        setCsvText(reader.result);
+        csvForm.setFieldValue("csvText", reader.result);
       }
     };
     reader.readAsText(file, "utf-8");
-  };
-
-  const handleManualSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    upsertMutation.mutate();
-  };
-
-  const handleCreateFieldSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    createFieldMutation.mutate();
   };
 
   return (
@@ -273,56 +268,72 @@ export function ManagePage() {
               cộng gộp tổng số thửa theo Ngày, Loại dữ liệu và Xã.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Input
-                value={sheetUrl}
-                onChange={(e) => setSheetUrl(e.target.value)}
-                placeholder="Dán đường dẫn Google Sheet (chế độ xem công khai)..."
-                className="flex-1"
-              />
-              <Button
-                onClick={() => syncMutation.mutate()}
-                disabled={syncMutation.isPending}
-                className="gap-2"
-              >
-                <CloudDownload className="size-4" />
-                <span>
-                  {syncMutation.isPending
-                    ? "Đang đồng bộ..."
-                    : "Đồng bộ từ Google Sheet"}
-                </span>
-              </Button>
-            </div>
+          <CardContent>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void syncForm.handleSubmit();
+              }}
+              className="space-y-3"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <syncForm.Field name="sheetUrl">
+                  {(field) => (
+                    <Input
+                      value={field.state.value}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Dán đường dẫn Google Sheet (chế độ xem công khai)..."
+                      className="flex-1"
+                    />
+                  )}
+                </syncForm.Field>
+                <Button
+                  type="submit"
+                  disabled={syncMutation.isPending}
+                  className="gap-2"
+                >
+                  <CloudDownload className="size-4" />
+                  <span>
+                    {syncMutation.isPending
+                      ? "Đang đồng bộ..."
+                      : "Đồng bộ từ Google Sheet"}
+                  </span>
+                </Button>
+              </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <label
-                htmlFor="replace-existing-sheet"
-                className="flex items-center gap-2"
-              >
-                <input
-                  id="replace-existing-sheet"
-                  type="checkbox"
-                  checked={replaceExisting}
-                  onChange={(e) => setReplaceExisting(e.target.checked)}
-                />
-                <span>
-                  Làm mới toàn bộ bản ghi đồng bộ từ Google Sheet (giữ nguyên
-                  bản ghi nhập tay)
-                </span>
-              </label>
-              {summaryQuery.data?.lastSync && (
-                <span>
-                  Lần đồng bộ gần nhất:{" "}
-                  <strong className="text-foreground">
-                    {new Date(
-                      summaryQuery.data.lastSync.syncedAt,
-                    ).toLocaleString("vi-VN")}
-                  </strong>{" "}
-                  ({summaryQuery.data.lastSync.recordsSynced} nhóm bản ghi)
-                </span>
-              )}
-            </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <syncForm.Field name="replaceExisting">
+                  {(field) => (
+                    <label
+                      htmlFor="replace-existing-sheet"
+                      className="flex items-center gap-2"
+                    >
+                      <input
+                        id="replace-existing-sheet"
+                        type="checkbox"
+                        checked={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.checked)}
+                      />
+                      <span>
+                        Làm mới toàn bộ bản ghi đồng bộ từ Google Sheet (giữ
+                        nguyên bản ghi nhập tay)
+                      </span>
+                    </label>
+                  )}
+                </syncForm.Field>
+                {summaryQuery.data?.lastSync && (
+                  <span>
+                    Lần đồng bộ gần nhất:{" "}
+                    <strong className="text-foreground">
+                      {new Date(
+                        summaryQuery.data.lastSync.syncedAt,
+                      ).toLocaleString("vi-VN")}
+                    </strong>{" "}
+                    ({summaryQuery.data.lastSync.recordsSynced} nhóm bản ghi)
+                  </span>
+                )}
+              </div>
+            </form>
           </CardContent>
         </Card>
 
@@ -337,63 +348,94 @@ export function ManagePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleManualSubmit} className="space-y-3.5">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void manualForm.handleSubmit();
+                }}
+                className="space-y-3.5"
+              >
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <DeferredDatePicker
-                    label="Ngày thực hiện"
-                    isRequired
-                    className="w-full"
-                    value={parseDate(reportDate)}
-                    onChange={(date) => setReportDate(date?.toString() ?? "")}
-                  />
+                  <manualForm.Field name="reportDate">
+                    {(field) => (
+                      <DeferredDatePicker
+                        label="Ngày thực hiện"
+                        isRequired
+                        className="w-full"
+                        value={parseDate(field.state.value)}
+                        onChange={(date) =>
+                          field.handleChange(date?.toString() ?? "")
+                        }
+                      />
+                    )}
+                  </manualForm.Field>
                   <div className="space-y-1.5">
                     <Label>Hạng mục dữ liệu</Label>
-                    <Select value={fieldCode} onValueChange={setFieldCode}>
-                      <SelectTrigger aria-label="Chọn hạng mục dữ liệu">
-                        <SelectValue placeholder="Chọn hạng mục" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {fields.map((f) => (
-                          <SelectItem key={f.code} value={f.code}>
-                            {f.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <manualForm.Field name="fieldCode">
+                      {(field) => (
+                        <Select
+                          value={field.state.value}
+                          onValueChange={field.handleChange}
+                        >
+                          <SelectTrigger aria-label="Chọn hạng mục dữ liệu">
+                            <SelectValue placeholder="Chọn hạng mục" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {fields.map((f) => (
+                              <SelectItem key={f.code} value={f.code}>
+                                {f.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </manualForm.Field>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="manual-commune">Đơn vị xã (tùy chọn)</Label>
-                    <Input
-                      id="manual-commune"
-                      placeholder="VD: Độc Lập, Quảng Uyên..."
-                      value={commune}
-                      onChange={(e) => setCommune(e.target.value)}
-                    />
+                    <manualForm.Field name="commune">
+                      {(field) => (
+                        <Input
+                          id="manual-commune"
+                          placeholder="VD: Độc Lập, Quảng Uyên..."
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                        />
+                      )}
+                    </manualForm.Field>
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="manual-parcel-count">Số thửa</Label>
-                    <Input
-                      id="manual-parcel-count"
-                      type="number"
-                      min={0}
-                      required
-                      value={parcelCount}
-                      onChange={(e) => setParcelCount(e.target.value)}
-                    />
+                    <manualForm.Field name="parcelCount">
+                      {(field) => (
+                        <Input
+                          id="manual-parcel-count"
+                          type="number"
+                          min={0}
+                          required
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                        />
+                      )}
+                    </manualForm.Field>
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
                   <Label htmlFor="manual-note">Ghi chú (tùy chọn)</Label>
-                  <Input
-                    id="manual-note"
-                    placeholder="Ghi chú bổ sung..."
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                  />
+                  <manualForm.Field name="note">
+                    {(field) => (
+                      <Input
+                        id="manual-note"
+                        placeholder="Ghi chú bổ sung..."
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                      />
+                    )}
+                  </manualForm.Field>
                 </div>
 
                 <Button
@@ -417,33 +459,49 @@ export function ManagePage() {
                 trúc cột
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3.5">
-              <div>
-                <Input
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={handleFileUpload}
-                />
-              </div>
-              <Textarea
-                rows={5}
-                placeholder="Hoặc dán trực tiếp nội dung CSV vào đây..."
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                className="gap-2"
-                disabled={!csvText.trim() || csvMutation.isPending}
-                onClick={() => csvMutation.mutate()}
+            <CardContent>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void csvForm.handleSubmit();
+                }}
+                className="space-y-3.5"
               >
-                <Upload className="size-4" />
-                <span>
-                  {csvMutation.isPending
-                    ? "Đang xử lý CSV..."
-                    : "Nhập dữ liệu từ CSV"}
-                </span>
-              </Button>
+                <div>
+                  <Input
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={handleFileUpload}
+                  />
+                </div>
+                <csvForm.Field name="csvText">
+                  {(field) => (
+                    <>
+                      <Textarea
+                        rows={5}
+                        placeholder="Hoặc dán trực tiếp nội dung CSV vào đây..."
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                      />
+                      <Button
+                        type="submit"
+                        variant="outline"
+                        className="gap-2"
+                        disabled={
+                          !field.state.value.trim() || csvMutation.isPending
+                        }
+                      >
+                        <Upload className="size-4" />
+                        <span>
+                          {csvMutation.isPending
+                            ? "Đang xử lý CSV..."
+                            : "Nhập dữ liệu từ CSV"}
+                        </span>
+                      </Button>
+                    </>
+                  )}
+                </csvForm.Field>
+              </form>
             </CardContent>
           </Card>
         </div>
@@ -461,26 +519,41 @@ export function ManagePage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <form
-              onSubmit={handleCreateFieldSubmit}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void createFieldForm.handleSubmit();
+              }}
               className="grid grid-cols-1 gap-3 sm:grid-cols-4"
             >
-              <Input
-                placeholder="Mã trường (VD: CHUYEN_MUC_DICH)"
-                required
-                value={newFieldCode}
-                onChange={(e) => setNewFieldCode(e.target.value)}
-              />
-              <Input
-                placeholder="Tên hiển thị trên bảng theo dõi"
-                required
-                value={newFieldLabel}
-                onChange={(e) => setNewFieldLabel(e.target.value)}
-              />
-              <Input
-                placeholder="Tên nhãn tương ứng trong Sheet"
-                value={newFieldAlias}
-                onChange={(e) => setNewFieldAlias(e.target.value)}
-              />
+              <createFieldForm.Field name="code">
+                {(field) => (
+                  <Input
+                    placeholder="Mã trường (VD: CHUYEN_MUC_DICH)"
+                    required
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                )}
+              </createFieldForm.Field>
+              <createFieldForm.Field name="label">
+                {(field) => (
+                  <Input
+                    placeholder="Tên hiển thị trên bảng theo dõi"
+                    required
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                )}
+              </createFieldForm.Field>
+              <createFieldForm.Field name="alias">
+                {(field) => (
+                  <Input
+                    placeholder="Tên nhãn tương ứng trong Sheet"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                )}
+              </createFieldForm.Field>
               <Button
                 type="submit"
                 variant="outline"
@@ -564,11 +637,17 @@ export function ManagePage() {
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            setReportDate(r.reportDate);
-                            setFieldCode(r.fieldCode);
-                            setCommune(r.commune);
-                            setParcelCount(String(r.parcelCount));
-                            setNote(r.note ?? "");
+                            manualForm.setFieldValue(
+                              "reportDate",
+                              r.reportDate,
+                            );
+                            manualForm.setFieldValue("fieldCode", r.fieldCode);
+                            manualForm.setFieldValue("commune", r.commune);
+                            manualForm.setFieldValue(
+                              "parcelCount",
+                              String(r.parcelCount),
+                            );
+                            manualForm.setFieldValue("note", r.note ?? "");
                             window.scrollTo({ top: 0, behavior: "smooth" });
                           }}
                         >
