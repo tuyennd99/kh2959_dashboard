@@ -268,7 +268,7 @@ export function DashboardPage() {
                     </p>
                   </div>
 
-                  {latestDay && (
+                  {/* {latestDay && (
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <span className="text-muted-foreground">
                         Ngày mới nhất ({formatShortDate(latestDay.reportDate)}):
@@ -300,7 +300,7 @@ export function DashboardPage() {
                         </span>
                       )}
                     </div>
-                  )}
+                  )} */}
                 </div>
 
                 {/* Lưới thẻ từng ngày thực hiện có thanh tiến độ trực quan */}
