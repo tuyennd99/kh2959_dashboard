@@ -1,17 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { parseDate } from "@internationalized/date";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   Archive,
   ArrowDownRight,
   ArrowUpRight,
-  Building2,
+  FilePenLine,
   CheckCircle2,
   FileCheck2,
   FolderKanban,
   RefreshCw,
   RotateCcw,
+  ScanLine,
   Search,
+  UserRoundSearch,
 } from "lucide-react";
 import {
   fetchDashboardRecords,
@@ -65,6 +67,11 @@ export function DashboardPage() {
   const [search, setSearch] = useState<string>("");
   const [page, setPage] = useState<number>(1);
   const [branch, setBranch] = useState<string>("");
+  const [dailyPage, setDailyPage] = useState<number>(1);
+  const [dailyPageSize, setDailyPageSize] = useState<number>(10);
+  const [recordsPageSize, setRecordsPageSize] = useState<number>(25);
+
+  useEffect(() => setDailyPage(1), [fromDate, toDate, fieldCode, commune]);
 
   const summaryQuery = useQuery({
     queryKey: ["dashboard-summary", { fromDate, toDate, fieldCode, commune }],
@@ -81,7 +88,7 @@ export function DashboardPage() {
   const recordsQuery = useQuery({
     queryKey: [
       "dashboard-records",
-      { fromDate, toDate, fieldCode, commune, search, page },
+      { fromDate, toDate, fieldCode, commune, search, page, recordsPageSize },
     ],
     queryFn: () =>
       fetchDashboardRecords({
@@ -91,7 +98,7 @@ export function DashboardPage() {
         commune: commune === "ALL" ? undefined : commune,
         search: search || undefined,
         page,
-        limit: 25,
+        limit: recordsPageSize,
       }),
     placeholderData: keepPreviousData,
   });
@@ -106,6 +113,17 @@ export function DashboardPage() {
   const fields = summary?.fields ?? [];
   const communes = summary?.communes ?? [];
   const byDate = summary?.byDate ?? [];
+  const dailyRows = [...byDate].reverse();
+  const dailyTotalPages = Math.max(
+    1,
+    Math.ceil(dailyRows.length / dailyPageSize),
+  );
+  const currentDailyPage = Math.min(dailyPage, dailyTotalPages);
+  const dailyStartIndex = (currentDailyPage - 1) * dailyPageSize;
+  const dailyPageRows = dailyRows.slice(
+    dailyStartIndex,
+    dailyStartIndex + dailyPageSize,
+  );
   const records = recordsQuery.data?.data ?? [];
   const recordsMeta = recordsQuery.data?.meta;
   const ext = externalQuery.data;
@@ -153,9 +171,12 @@ export function DashboardPage() {
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         <section className="space-y-3">
-          <h2 className="text-base font-bold text-foreground sm:text-lg">
-            Đối khớp dữ liệu dân cư
-          </h2>
+          <div className="flex items-center gap-2">
+            <UserRoundSearch className="size-5 text-primary" />
+            <h2 className="text-base font-bold text-foreground sm:text-lg">
+              Đối khớp dữ liệu dân cư
+            </h2>
+          </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Card className="p-4">
               <p className="text-xs font-medium text-muted-foreground">
@@ -188,9 +209,15 @@ export function DashboardPage() {
             KHỐI 1: SỔ THEO DÕI SẢN LƯỢNG SỐ THỬA HẰNG NGÀY (ĐƯA LÊN TRƯỚC)
            ===================================================================== */}
         <section
-          className={`space-y-4 transition-opacity ${summaryQuery.isFetching ? "opacity-80" : "opacity-100"
+          className={`space-y-4 border-t border-border  pt-6 transition-opacity ${summaryQuery.isFetching ? "opacity-80" : "opacity-100"
             }`}
         >
+          <div className="flex items-center gap-2">
+            <FilePenLine className="size-5 text-primary" />
+            <h2 className="text-base font-bold text-foreground sm:text-lg">
+              Nhóm nội nghiệp
+            </h2>
+          </div>
           {/* LEDGER PANEL ĐẦU TRANG: Mở trang biết ngay tổng số thửa và từng ngày làm được bao nhiêu */}
           <Card className="overflow-hidden">
             <div className="grid grid-cols-1 divide-y lg:grid-cols-12 lg:divide-x lg:divide-y-0">
@@ -403,7 +430,7 @@ export function DashboardPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span
-                        className="size-2.5 shrink-0 rounded-[2px]"
+                        className="size-2.5 shrink-0 rounded-xs"
                         style={{ backgroundColor: color }}
                       />
                       <span
@@ -442,7 +469,7 @@ export function DashboardPage() {
           </div>
 
           {/* THANH LỌC CO GIÃN VÀ TỰ XUỐNG DÒNG */}
-          <Card className="p-4">
+          {/* <Card className="p-4">
             <div className="flex flex-wrap items-end gap-3">
               <DeferredDatePicker
                 label="Từ ngày thực hiện"
@@ -533,10 +560,10 @@ export function DashboardPage() {
                 </Button>
               </div>
             </div>
-          </Card>
+          </Card> */}
 
           {/* BIỂU ĐỒ SẢN LƯỢNG HẰNG NGÀY & CƠ CẤU */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="p-5 lg:col-span-2">
               <div className="mb-4">
                 <h2 className="text-base font-semibold text-foreground">
@@ -589,10 +616,10 @@ export function DashboardPage() {
                 />
               </Card>
             </div>
-          </div>
+          </div> */}
 
           {/* BIỂU ĐỒ SO SÁNH TIẾN ĐỘ GIỮA CÁC TUẦN */}
-          <Card className="p-5">
+          {/* <Card className="p-5">
             <div className="mb-4">
               <h2 className="text-base font-semibold text-foreground">
                 Biểu đồ đường so sánh tiến độ giữa các tuần
@@ -602,7 +629,7 @@ export function DashboardPage() {
               </p>
             </div>
             <WeeklyComparisonLineChart byDate={byDate} />
-          </Card>
+          </Card> */}
 
           {/* BẢNG SỐ LIỆU HẰNG NGÀY & CHI TIẾT */}
           <Card className="p-5">
@@ -618,10 +645,12 @@ export function DashboardPage() {
                 </div>
                 <TabsList>
                   <TabsTrigger value="daily">
-                    Tổng hợp theo ngày ({byDate.length} ngày)
+                    Tổng hợp theo ngày
+                    {/* Tổng hợp theo ngày ({byDate.length} ngày) */}
                   </TabsTrigger>
                   <TabsTrigger value="records">
-                    Chi tiết theo xã ({recordsMeta?.total ?? 0} dòng)
+                    Chi tiết theo xã
+                    {/* Chi tiết theo xã ({recordsMeta?.total ?? 0} dòng) */}
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -669,7 +698,7 @@ export function DashboardPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      [...byDate].reverse().map((day) => (
+                      dailyPageRows.map((day) => (
                         <TableRow key={day.reportDate}>
                           <TableCell className="font-semibold whitespace-nowrap tabular-nums">
                             {formatFullDate(day.reportDate)}
@@ -722,6 +751,57 @@ export function DashboardPage() {
                     )}
                   </TableBody>
                 </Table>
+
+                {byDate.length > 0 && (
+                  <div className="flex flex-col gap-3 border-t pt-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-muted-foreground">
+                      Hiển thị {dailyStartIndex + 1}–
+                      {Math.min(dailyStartIndex + dailyPageSize, byDate.length)}{" "}
+                      / {byDate.length} ngày
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-muted-foreground">Số dòng</span>
+                      <Select
+                        value={String(dailyPageSize)}
+                        onValueChange={(value) => {
+                          setDailyPageSize(Number(value));
+                          setDailyPage(1);
+                        }}
+                      >
+                        <SelectTrigger
+                          className="w-19"
+                          aria-label="Số dòng mỗi trang"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10</SelectItem>
+                          <SelectItem value="20">20</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="px-1 text-muted-foreground">
+                        Trang {currentDailyPage} / {dailyTotalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentDailyPage <= 1}
+                        onClick={() => setDailyPage(currentDailyPage - 1)}
+                      >
+                        Trang trước
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentDailyPage >= dailyTotalPages}
+                        onClick={() => setDailyPage(currentDailyPage + 1)}
+                      >
+                        Trang sau
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </TabsContent>
 
               <TabsContent value="records" className="mt-4 space-y-3">
@@ -747,7 +827,7 @@ export function DashboardPage() {
                       <TableHead>Hạng mục dữ liệu</TableHead>
                       <TableHead>Đơn vị xã</TableHead>
                       <TableHead className="text-right">Số thửa</TableHead>
-                      <TableHead>Nguồn dữ liệu</TableHead>
+                      {/* <TableHead>Nguồn dữ liệu</TableHead> */}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -777,7 +857,7 @@ export function DashboardPage() {
                           <TableCell className="text-right font-semibold whitespace-nowrap tabular-nums">
                             {formatNumber(r.parcelCount)}
                           </TableCell>
-                          <TableCell>
+                          {/* <TableCell>
                             <Badge variant="secondary">
                               {r.source === "SHEET_SYNC"
                                 ? "Google Sheet"
@@ -785,20 +865,48 @@ export function DashboardPage() {
                                   ? "File CSV"
                                   : "Nhập tay"}
                             </Badge>
-                          </TableCell>
+                          </TableCell> */}
                         </TableRow>
                       ))
                     )}
                   </TableBody>
                 </Table>
 
-                {recordsMeta && recordsMeta.totalPages > 1 && (
-                  <div className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
-                    <span>
-                      Trang {recordsMeta.page} / {recordsMeta.totalPages} (Tổng{" "}
-                      {recordsMeta.total} bản ghi)
+                {recordsMeta && recordsMeta.total > 0 && (
+                  <div className="flex flex-col gap-3 border-t pt-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-muted-foreground">
+                      Hiển thị{" "}
+                      {(recordsMeta.page - 1) * recordsMeta.limit + 1}–
+                      {Math.min(
+                        recordsMeta.page * recordsMeta.limit,
+                        recordsMeta.total,
+                      )}{" "}
+                      / {recordsMeta.total} bản ghi
                     </span>
-                    <div className="flex gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-muted-foreground">Số dòng</span>
+                      <Select
+                        value={String(recordsPageSize)}
+                        onValueChange={(value) => {
+                          setRecordsPageSize(Number(value));
+                          setPage(1);
+                        }}
+                      >
+                        <SelectTrigger
+                          className="w-[76px]"
+                          aria-label="Số bản ghi mỗi trang"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10</SelectItem>
+                          <SelectItem value="25">25</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="px-1 text-muted-foreground">
+                        Trang {recordsMeta.page} / {recordsMeta.totalPages}
+                      </span>
                       <Button
                         variant="outline"
                         size="sm"
@@ -828,13 +936,11 @@ export function DashboardPage() {
            ===================================================================== */}
         <section className="space-y-3 border-t border-border pt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <Building2 className="size-5 text-primary" />
-                <h2 className="text-base font-bold text-foreground sm:text-lg">
-                  Tiến độ chuẩn hóa hồ sơ lưu trữ trực tuyến
-                </h2>
-              </div>
+            <div className="flex items-center gap-2">
+              <ScanLine className="size-5 text-primary" />
+              <h2 className="text-base font-bold text-foreground sm:text-lg">
+                Nhóm ngoại nghiệp
+              </h2>
             </div>
 
           </div>
