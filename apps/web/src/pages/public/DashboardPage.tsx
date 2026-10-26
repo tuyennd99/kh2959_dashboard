@@ -6,6 +6,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   FilePenLine,
+  MapPinned,
   CheckCircle2,
   FileCheck2,
   FolderKanban,
@@ -1030,6 +1031,21 @@ export function DashboardPage() {
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Hộp tài liệu lưu trữ đã quét
+              </p>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+                <span>Số thửa không gian</span>
+                <MapPinned className="size-4 text-primary" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-foreground">
+                {formatNumber(
+                  summary?.totalsByField["OUT_OF_LIST_GCN"]?.parcelCount ?? 0,
+                )}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Theo số thửa của GCN Ngoài Danh Sách
               </p>
             </Card>
 
