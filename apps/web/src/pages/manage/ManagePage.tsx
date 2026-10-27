@@ -58,6 +58,10 @@ import { useSessionStore } from "../../stores/session-store";
 
 const DEFAULT_SHEET_URL =
   "https://docs.google.com/spreadsheets/d/16WlVI8xzoxudlmCW7hiMsnynFEr1dNhXuPUBW4XmvzY/edit?gid=982199452#gid=982199452";
+const DEFAULT_TWO_TIER_SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/1SOaLTftRmFtYw937R6NIIHewdDEFJG3sSUf0azaSkNI/edit?gid=0#gid=0";
+const DEFAULT_VNLIS_SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/1GYM2mqpc8vWB9EAgxcCSzuLFqKbRhOYB/edit?gid=1037546126#gid=1037546126";
 
 export function ManagePage() {
   const session = useSessionStore((s) => s.session);
@@ -70,10 +74,17 @@ export function ManagePage() {
 
   const todayIso = today(getLocalTimeZone()).toString();
   const syncForm = useForm({
-    defaultValues: { sheetUrl: DEFAULT_SHEET_URL, replaceExisting: true },
+    defaultValues: {
+      sheetUrl: DEFAULT_SHEET_URL,
+      twoTierSheetUrl: DEFAULT_TWO_TIER_SHEET_URL,
+      vnlisSheetUrl: DEFAULT_VNLIS_SHEET_URL,
+      replaceExisting: true,
+    },
     onSubmit: ({ value }) =>
       syncMutation.mutate({
         sheetUrl: value.sheetUrl.trim() || undefined,
+        twoTierSheetUrl: value.twoTierSheetUrl.trim() || undefined,
+        vnlisSheetUrl: value.vnlisSheetUrl.trim() || undefined,
         replaceExisting: value.replaceExisting,
       }),
   });
@@ -126,6 +137,7 @@ export function ManagePage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard-records"] }),
+      queryClient.invalidateQueries({ queryKey: ["sheet-modules"] }),
     ]);
   };
 
@@ -244,11 +256,10 @@ export function ManagePage() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         {statusMessage && (
           <div
-            className={`rounded-lg border px-4 py-3 text-sm font-medium ${
-              statusMessage.type === "success"
+            className={`rounded-lg border px-4 py-3 text-sm font-medium ${statusMessage.type === "success"
                 ? "border-emerald-300 bg-emerald-50 text-emerald-900"
                 : "border-red-300 bg-red-50 text-red-900"
-            }`}
+              }`}
           >
             {statusMessage.text}
           </div>
@@ -276,32 +287,57 @@ export function ManagePage() {
               }}
               className="space-y-3"
             >
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <syncForm.Field name="sheetUrl">
-                  {(field) => (
-                    <Input
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="Dán đường dẫn Google Sheet (chế độ xem công khai)..."
-                      className="flex-1"
-                    />
-                  )}
-                </syncForm.Field>
-                <Button
-                  type="submit"
-                  disabled={syncMutation.isPending}
-                  className="gap-2"
-                >
-                  <CloudDownload className="size-4" />
-                  <span>
-                    {syncMutation.isPending
-                      ? "Đang đồng bộ..."
-                      : "Đồng bộ từ Google Sheet"}
-                  </span>
-                </Button>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="sync-sheet-url">
+                    Link Google Sheet 1: Xử lý dữ liệu bóc tách được từ tool
+                  </Label>
+                  <syncForm.Field name="sheetUrl">
+                    {(field) => (
+                      <Input
+                        id="sync-sheet-url"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        placeholder="Dán đường dẫn Google Sheet xử lý dữ liệu bóc tách..."
+                      />
+                    )}
+                  </syncForm.Field>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="sync-two-tier-url">
+                    Link Google Sheet 2: Quy đổi tờ thửa từ 3 cấp sang 2 cấp
+                  </Label>
+                  <syncForm.Field name="twoTierSheetUrl">
+                    {(field) => (
+                      <Input
+                        id="sync-two-tier-url"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        placeholder="Dán đường dẫn Google Sheet quy đổi tờ thửa từ 3 cấp sang 2 cấp..."
+                      />
+                    )}
+                  </syncForm.Field>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="sync-vnlis-url">
+                    Link Google Sheet 3: Trích xuất, ký số, đồng bộ VNLIS & Đối khớp dân cư (2 sheet)
+                  </Label>
+                  <syncForm.Field name="vnlisSheetUrl">
+                    {(field) => (
+                      <Input
+                        id="sync-vnlis-url"
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        placeholder="Dán đường dẫn Google Sheet đồng bộ VNLIS & Dân cư..."
+                      />
+                    )}
+                  </syncForm.Field>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs text-muted-foreground">
                 <syncForm.Field name="replaceExisting">
                   {(field) => (
                     <label
@@ -321,24 +357,38 @@ export function ManagePage() {
                     </label>
                   )}
                 </syncForm.Field>
-                {summaryQuery.data?.lastSync && (
-                  <span>
-                    Lần đồng bộ gần nhất:{" "}
-                    <strong className="text-foreground">
-                      {new Date(
-                        summaryQuery.data.lastSync.syncedAt,
-                      ).toLocaleString("vi-VN")}
-                    </strong>{" "}
-                    ({summaryQuery.data.lastSync.recordsSynced} nhóm bản ghi)
-                  </span>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {summaryQuery.data?.lastSync && (
+                    <span>
+                      Lần đồng bộ gần nhất:{" "}
+                      <strong className="text-foreground">
+                        {new Date(
+                          summaryQuery.data.lastSync.syncedAt,
+                        ).toLocaleString("vi-VN")}
+                      </strong>{" "}
+                      ({summaryQuery.data.lastSync.recordsSynced} nhóm bản ghi)
+                    </span>
+                  )}
+                  <Button
+                    type="submit"
+                    disabled={syncMutation.isPending}
+                    className="gap-2"
+                  >
+                    <CloudDownload className="size-4" />
+                    <span>
+                      {syncMutation.isPending
+                        ? "Đang đồng bộ..."
+                        : "Đồng bộ từ Google Sheet"}
+                    </span>
+                  </Button>
+                </div>
               </div>
             </form>
           </CardContent>
         </Card>
 
         {/* 2. NHẬP LIỆU TRỰC TIẾP & UPLOAD CSV */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
               <CardTitle>Nhập hoặc cập nhật số thửa thủ công</CardTitle>
@@ -504,10 +554,10 @@ export function ManagePage() {
               </form>
             </CardContent>
           </Card>
-        </div>
+        </div> */}
 
         {/* 3. QUẢN LÝ TRƯỜNG DỮ LIỆU MỞ RỘNG */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>
               Cấu hình các hạng mục dữ liệu (mở rộng thêm trường mới)
@@ -592,7 +642,7 @@ export function ManagePage() {
               ))}
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* 4. DANH SÁCH BẢN GHI GẦN ĐÂY */}
         <Card>

@@ -29,4 +29,12 @@ export class DashboardController {
   getExternalReport(@Query() query: ExternalReportQueryDto) {
     return this.dashboardService.getExternalReport(query.branch);
   }
+
+  @Get('sheet-modules')
+  getSheetModules(@Query('refresh') refresh?: string) {
+    if (refresh === '1' || refresh === 'true') {
+      return this.dashboardService.syncSheetModules();
+    }
+    return this.dashboardService.getSheetModules();
+  }
 }

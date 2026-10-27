@@ -6,7 +6,6 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   FilePenLine,
-  MapPinned,
   CheckCircle2,
   FileCheck2,
   FolderKanban,
@@ -20,6 +19,7 @@ import {
   fetchDashboardRecords,
   fetchDashboardSummary,
   fetchExternalReport,
+  fetchSheetModules,
 } from "../../api";
 import {
   CommuneHorizontalChart,
@@ -70,7 +70,7 @@ export function DashboardPage() {
   const [branch, setBranch] = useState<string>("");
   const [dailyPage, setDailyPage] = useState<number>(1);
   const [dailyPageSize, setDailyPageSize] = useState<number>(10);
-  const [recordsPageSize, setRecordsPageSize] = useState<number>(25);
+  const [recordsPageSize, setRecordsPageSize] = useState<number>(10);
 
   useEffect(() => setDailyPage(1), [fromDate, toDate, fieldCode, commune]);
 
@@ -110,7 +110,18 @@ export function DashboardPage() {
     placeholderData: keepPreviousData,
   });
 
+  const sheetModulesQuery = useQuery({
+    queryKey: ["sheet-modules"],
+    queryFn: () => fetchSheetModules(),
+    placeholderData: keepPreviousData,
+  });
+
   const summary = summaryQuery.data;
+  const sheetModules = sheetModulesQuery.data;
+  const popTotals = sheetModules?.populationMatch.totals;
+  const popRows = sheetModules?.populationMatch.rows ?? [];
+  const twoTier = sheetModules?.twoTierConversion;
+  const vnlis = sheetModules?.vnlisSync;
   const fields = summary?.fields ?? [];
   const communes = summary?.communes ?? [];
   const byDate = summary?.byDate ?? [];
@@ -172,11 +183,24 @@ export function DashboardPage() {
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         <section className="space-y-3">
-          <div className="flex items-center gap-2">
-            <UserRoundSearch className="size-5 text-primary" />
-            <h2 className="text-base font-bold text-foreground sm:text-lg">
-              Đối khớp dữ liệu dân cư
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {/* <UserRoundSearch className="size-5 text-primary" /> */}
+              <h2 className="text-lg font-bold text-foreground sm:text-2xl">
+                1. Đối khớp dữ liệu dân cư (phối hợp với PC06)
+              </h2>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void fetchSheetModules(true).then(() => sheetModulesQuery.refetch())}
+              disabled={sheetModulesQuery.isFetching}
+            >
+              <RefreshCw
+                className={`size-3.5 ${sheetModulesQuery.isFetching ? "animate-spin" : ""}`}
+              />
+              <span>Làm mới dữ liệu Sheet</span>
+            </Button>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Card className="p-4">
@@ -184,26 +208,106 @@ export function DashboardPage() {
                 Tổng thửa
               </p>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-                {formatNumber(1_846_570)} <span className="font-normal text-gray-600 text-base">thửa</span>
+                {formatNumber(popTotals?.totalParcels ?? 1_858_986)}{" "}
+                <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs font-medium text-muted-foreground">
-                Đã đối khớp thành công
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Đã đối khớp thành công
+                </p>
+                {popTotals?.matchedRate && (
+                  <Badge variant="secondary">{popTotals.matchedRate}</Badge>
+                )}
+              </div>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-                {formatNumber(1_295_709)} <span className="font-normal text-gray-600 text-base">thửa</span>
+                {formatNumber(popTotals?.matchedProvinceWide ?? 1_307_905)}{" "}
+                <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs font-medium text-muted-foreground">
-                Chưa khớp, chưa đủ điều kiện
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Chưa khớp, chưa đủ điều kiện
+                </p>
+                {popTotals?.unmatchedRate && (
+                  <Badge variant="secondary">{popTotals.unmatchedRate}</Badge>
+                )}
+              </div>
               <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-                {formatNumber(550_861)} <span className="font-normal text-gray-600 text-base">thửa</span>
+                {formatNumber(popTotals?.unmatchedProvinceWide ?? 551_081)}{" "}
+                <span className="font-normal text-gray-600 text-base">thửa</span>
               </p>
             </Card>
           </div>
+
+          {popRows.length > 0 && (
+            <Card className="p-5">
+              <div className="mb-3">
+                <h3 className="text-base font-semibold text-foreground">
+                  Chi tiết theo dõi đối khớp dữ liệu dân cư theo xã
+                </h3>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">STT</TableHead>
+                    <TableHead>Tên xã</TableHead>
+                    <TableHead className="text-right">Gửi PC06/xã</TableHead>
+                    <TableHead className="text-right">
+                      Nhận đã đối khớp
+                    </TableHead>
+                    <TableHead className="text-right">
+                      Đẩy thông tin chủ
+                    </TableHead>
+                    <TableHead className="text-right">
+                      Đẩy thông tin dân cư (theo thửa)
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {popRows.map((row) => (
+                    <TableRow key={`${row.stt}-${row.commune}`}>
+                      <TableCell className="tabular-nums">{row.stt}</TableCell>
+                      <TableCell className="font-medium">
+                        {row.commune}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(row.sentPc06)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(row.receivedMatched)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(row.pushedOwnerInfo)}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {formatNumber(row.pushedPopulationParcels)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {popTotals && (
+                    <TableRow className="bg-secondary/60 font-bold">
+                      <TableCell colSpan={2}>Tổng cộng</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(popTotals.sentPc06)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(popTotals.receivedMatched)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(popTotals.pushedOwnerInfo)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(popTotals.pushedPopulationParcels)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
         </section>
 
         {/* =====================================================================
@@ -214,16 +318,16 @@ export function DashboardPage() {
             }`}
         >
           <div className="flex items-center gap-2">
-            <FilePenLine className="size-5 text-primary" />
-            <h2 className="text-base font-bold text-foreground sm:text-lg">
-              Nhóm nội nghiệp
+            {/* <FilePenLine className="size-5 text-primary" /> */}
+            <h2 className="text-lg font-bold text-foreground sm:text-2xl">
+              2. Xử lý dữ liệu bóc tách được từ tool
             </h2>
           </div>
           {/* LEDGER PANEL ĐẦU TRANG: Mở trang biết ngay tổng số thửa và từng ngày làm được bao nhiêu */}
           <Card className="overflow-hidden">
             <div className="grid grid-cols-1 divide-y lg:grid-cols-12 lg:divide-x lg:divide-y-0">
               {/* Cột trái: Tổng số thửa đã thực hiện (Hero Figure >= 48px, proportional figures) */}
-              <div className="flex flex-col justify-between p-5 sm:p-6 lg:col-span-5 border-color: var(--border-strong);">
+              <div className="flex flex-col justify-between p-5 sm:p-6 lg:col-span-5 border-(--border-strong)">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-muted-foreground">
@@ -933,14 +1037,223 @@ export function DashboardPage() {
         </section>
 
         {/* =====================================================================
-            KHỐI 2: TIẾN ĐỘ CHUẨN HÓA HỒ SƠ LƯU TRỮ (API CHUANHOA.MINHHUUB.ORG)
+            KHỐI 3: QUY ĐỔI TỜ THỬA TỪ 3 CẤP SANG 2 CẤP
+           ===================================================================== */}
+        <section className="space-y-3 border-t border-border pt-6">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-bold text-foreground sm:text-2xl">
+              3. Quy đổi tờ thửa từ 3 cấp sang 2 cấp
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Card className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Tổng số thửa đã quy đổi
+              </p>
+              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
+                {formatNumber(twoTier?.totalParcels ?? 0)}{" "}
+                <span className="text-base font-normal text-gray-600">
+                  thửa
+                </span>
+              </p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Số đơn vị xã đã thực hiện
+              </p>
+              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
+                {formatNumber(twoTier?.rows.length ?? 0)}{" "}
+                <span className="text-base font-normal text-gray-600">xã</span>
+              </p>
+            </Card>
+          </div>
+
+          <Card className="p-5">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-16">STT</TableHead>
+                  <TableHead>Tên xã</TableHead>
+                  <TableHead className="text-right">Số thửa</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(twoTier?.rows ?? []).length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={3}
+                      className="py-6 text-center text-muted-foreground"
+                    >
+                      Đang tải dữ liệu quy đổi tờ thửa...
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                    {twoTier?.rows.map((row) => (
+                      <TableRow key={`${row.stt}-${row.commune}`}>
+                        <TableCell className="tabular-nums">
+                          {row.stt}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {row.commune}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums">
+                          {formatNumber(row.parcelCount)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="bg-secondary/60 font-bold">
+                      <TableCell colSpan={2}>Tổng cộng</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(twoTier?.totalParcels ?? 0)}
+                      </TableCell>
+                    </TableRow>
+                  </>
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </section>
+
+        {/* =====================================================================
+            KHỐI 4: TRÍCH XUẤT, KÝ SỐ, ĐỒNG BỘ LÊN VNLIS
+           ===================================================================== */}
+        <section className="space-y-3 border-t border-border pt-6">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-bold text-foreground sm:text-2xl">
+              4. Trích xuất, ký số, đồng bộ lên VNLIS
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Card className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Trích xuất từ iLIS
+              </p>
+              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
+                {formatNumber(vnlis?.totals.extractedIlis ?? 0)}{" "}
+                <span className="text-base font-normal text-gray-600">
+                  thửa
+                </span>
+              </p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Ký số XML
+              </p>
+              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
+                {formatNumber(vnlis?.totals.signedXml ?? 0)}{" "}
+                <span className="text-base font-normal text-gray-600">
+                  thửa
+                </span>
+              </p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Đẩy VNLIS
+              </p>
+              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
+                {formatNumber(vnlis?.totals.pushedVnlis ?? 0)}{" "}
+                <span className="text-base font-normal text-gray-600">
+                  thửa
+                </span>
+              </p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-xs font-medium text-muted-foreground">
+                Kết quả VNLIS tăng thêm
+              </p>
+              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
+                {formatNumber(vnlis?.totals.vnlisAddedResult ?? 0)}{" "}
+                <span className="text-base font-normal text-gray-600">
+                  thửa
+                </span>
+              </p>
+            </Card>
+          </div>
+
+          <Card className="p-5">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-16">STT</TableHead>
+                  <TableHead>Tên xã</TableHead>
+                  <TableHead className="text-right">
+                    Trích xuất từ iLIS
+                  </TableHead>
+                  <TableHead className="text-right">Ký số XML</TableHead>
+                  <TableHead className="text-right">Đẩy VNLIS</TableHead>
+                  <TableHead className="text-right">
+                    Kết quả VNLIS tăng thêm
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(vnlis?.rows ?? []).length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={6}
+                      className="py-6 text-center text-muted-foreground"
+                    >
+                      Đang tải dữ liệu đồng bộ VNLIS...
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                    {vnlis?.rows.map((row) => (
+                      <TableRow key={`${row.stt}-${row.commune}`}>
+                        <TableCell className="tabular-nums">
+                          {row.stt}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {row.commune}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatNumber(row.extractedIlis)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatNumber(row.signedXml)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatNumber(row.pushedVnlis)}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums">
+                          {formatNumber(row.vnlisAddedResult)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="bg-secondary/60 font-bold">
+                      <TableCell colSpan={2}>Tổng cộng</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(vnlis?.totals.extractedIlis ?? 0)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(vnlis?.totals.signedXml ?? 0)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(vnlis?.totals.pushedVnlis ?? 0)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(vnlis?.totals.vnlisAddedResult ?? 0)}
+                      </TableCell>
+                    </TableRow>
+                  </>
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </section>
+
+        {/* =====================================================================
+            KHỐI 5: TIẾN ĐỘ CHUẨN HÓA HỒ SƠ LƯU TRỮ (API CHUANHOA.MINHHUUB.ORG)
            ===================================================================== */}
         <section className="space-y-3 border-t border-border pt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <ScanLine className="size-5 text-primary" />
-              <h2 className="text-base font-bold text-foreground sm:text-lg">
-                Nhóm ngoại nghiệp
+              {/* <ScanLine className="size-5 text-primary" /> */}
+              <h2 className="text-lg font-bold text-foreground sm:text-2xl">
+                5. Nhóm ngoại nghiệp
               </h2>
             </div>
 
@@ -1031,21 +1344,6 @@ export function DashboardPage() {
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Hộp tài liệu lưu trữ đã quét
-              </p>
-            </Card>
-
-            <Card className="p-4">
-              <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-                <span>Số thửa không gian</span>
-                <MapPinned className="size-4 text-primary" />
-              </div>
-              <p className="mt-2 text-2xl font-bold text-foreground">
-                {formatNumber(
-                  summary?.totalsByField["OUT_OF_LIST_GCN"]?.parcelCount ?? 0,
-                )}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Theo số thửa của GCN Ngoài Danh Sách
               </p>
             </Card>
 

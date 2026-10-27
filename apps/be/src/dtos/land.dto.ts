@@ -67,6 +67,14 @@ export class SyncSheetDto {
   sheetUrl?: string;
 
   @IsOptional()
+  @IsString()
+  twoTierSheetUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  vnlisSheetUrl?: string;
+
+  @IsOptional()
   @IsBoolean()
   replaceExisting?: boolean;
 }

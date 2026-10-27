@@ -3,6 +3,7 @@ import type {
   DashboardSummaryDto,
   ExternalChuanHoaReportDto,
   FieldDefinitionDto,
+  GoogleSheetModulesDto,
   LandStatRecordDto,
   LoginResponseDto,
   SyncLogDto,
@@ -53,6 +54,15 @@ export async function fetchExternalReport(branch?: string) {
   return res.data;
 }
 
+export async function fetchSheetModules(refresh?: boolean) {
+  const res = await requestJson<GoogleSheetModulesDto>({
+    method: 'GET',
+    url: '/dashboard/sheet-modules',
+    params: refresh ? { refresh: '1' } : undefined,
+  });
+  return res.data;
+}
+
 export async function loginApi(payload: { email: string; password: string }) {
   const res = await requestJson<LoginResponseDto>({
     method: 'POST',
@@ -72,6 +82,8 @@ export async function fetchMeApi() {
 
 export async function syncGoogleSheetApi(payload: {
   sheetUrl?: string;
+  twoTierSheetUrl?: string;
+  vnlisSheetUrl?: string;
   replaceExisting?: boolean;
 }) {
   const res = await requestJson<SyncLogDto>({

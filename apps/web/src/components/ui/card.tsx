@@ -6,7 +6,7 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
     <div
       data-slot="card"
       className={cn(
-        'border-[color:var(--border-strong)] bg-card text-card-foreground rounded-xl border',
+        'border-(--border-strong) bg-card text-card-foreground rounded-xl border',
         className,
       )}
       {...props}

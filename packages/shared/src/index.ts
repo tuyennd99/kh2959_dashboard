@@ -6,6 +6,7 @@ export const DEFAULT_FIELD_CODES = {
   OWNER_MISMATCH: 'OWNER_MISMATCH',
   OUT_OF_LIST_GCN: 'OUT_OF_LIST_GCN',
   STANDARDIZED_MAP_SHEETS: 'STANDARDIZED_MAP_SHEETS',
+  SPATIAL_PARCELS: 'SPATIAL_PARCELS',
 } as const;
 
 export interface FieldDefinitionDto {
@@ -88,6 +89,67 @@ export interface ExternalChuanHoaReportDto {
   branch: string;
   available?: boolean;
   errorMessage?: string;
+}
+
+export interface TwoTierConversionRowDto {
+  stt: number;
+  commune: string;
+  parcelCount: number;
+}
+
+export interface TwoTierConversionReportDto {
+  rows: TwoTierConversionRowDto[];
+  totalParcels: number;
+}
+
+export interface VnlisSyncRowDto {
+  stt: number;
+  commune: string;
+  extractedIlis: number;
+  signedXml: number;
+  pushedVnlis: number;
+  vnlisAddedResult: number;
+}
+
+export interface VnlisSyncReportDto {
+  rows: VnlisSyncRowDto[];
+  totals: {
+    extractedIlis: number;
+    signedXml: number;
+    pushedVnlis: number;
+    vnlisAddedResult: number;
+  };
+}
+
+export interface PopulationMatchRowDto {
+  stt: number;
+  commune: string;
+  sentPc06: number;
+  receivedMatched: number;
+  pushedOwnerInfo: number;
+  pushedPopulationParcels: number;
+}
+
+export interface PopulationMatchReportDto {
+  rows: PopulationMatchRowDto[];
+  totals: {
+    sentPc06: number;
+    receivedMatched: number;
+    pushedOwnerInfo: number;
+    pushedPopulationParcels: number;
+    matchedProvinceWide: number;
+    unmatchedProvinceWide: number;
+    totalParcels: number;
+    matchedRate: string;
+    unmatchedRate: string;
+  };
+}
+
+export interface GoogleSheetModulesDto {
+  populationMatch: PopulationMatchReportDto;
+  twoTierConversion: TwoTierConversionReportDto;
+  vnlisSync: VnlisSyncReportDto;
+  syncedAt: string;
 }
 
 export interface AuthUserDto {

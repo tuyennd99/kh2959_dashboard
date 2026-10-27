@@ -12,6 +12,7 @@ import type {
   DashboardSummaryDto,
   ExternalChuanHoaReportDto,
   FieldDefinitionDto,
+  GoogleSheetModulesDto,
   LandStatRecordDto,
   MetricPair,
   SyncLogDto,
@@ -27,7 +28,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import {
   normalizeGoogleSheetExportUrl,
+  parsePopulationMatchCsv,
   parseSheetCsv,
+  parseTwoTierConversionCsv,
+  parseVnlisSyncCsv,
 } from '../utils/sheet-parser';
 
 export const RETIRED_FIELD_CODE = 'THREE_OLD_DISTRICTS';
@@ -57,6 +61,14 @@ export const CORE_FIELD_DEFINITIONS = [
     isDefault: true,
     sortOrder: 3,
   },
+  {
+    code: 'SPATIAL_PARCELS',
+    label: 'Số thửa không gian',
+    sheetAlias: null,
+    unit: 'thửa',
+    isDefault: true,
+    sortOrder: 4,
+  },
 ];
 
 @Injectable()
@@ -77,6 +89,45 @@ export class LandDashboardService implements OnModuleInit {
         create: def,
       });
     }
+
+    await this.prisma.$transaction(async (tx) => {
+      const copyId = 'SPATIAL_PARCELS_INITIAL_COPY';
+      // Serialize startup copies across API instances; the marker commits with the data.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${copyId}))`;
+      if (await tx.syncLog.findUnique({ where: { id: copyId } })) return;
+
+      const sourceRecords = await tx.landStatRecord.findMany({
+        where: { fieldCode: 'OUT_OF_LIST_GCN' },
+      });
+      const copied = sourceRecords.length
+        ? await tx.landStatRecord.createMany({
+            data: sourceRecords.map((record) => ({
+              reportDate: record.reportDate,
+              fieldCode: 'SPATIAL_PARCELS',
+              commune: record.commune,
+              bookCount: record.bookCount,
+              parcelCount: record.parcelCount,
+              extraData: record.extraData
+                ? (record.extraData as Prisma.InputJsonValue)
+                : Prisma.JsonNull,
+              source: record.source,
+              note: record.note,
+            })),
+            skipDuplicates: true,
+          })
+        : { count: 0 };
+
+      await tx.syncLog.create({
+        data: {
+          id: copyId,
+          source: 'INITIAL_COPY',
+          recordsSynced: copied.count,
+          status: 'SUCCESS',
+          message:
+            'Sao chép một lần từ GCN Ngoài Danh Sách sang Số thửa không gian',
+        },
+      });
+    });
   }
 
   async getFieldDefinitions(): Promise<FieldDefinitionDto[]> {
@@ -190,6 +241,7 @@ export class LandDashboardService implements OnModuleInit {
         distinct: ['commune'],
       }),
       this.prisma.syncLog.findFirst({
+        where: { source: { in: ['SHEET_SYNC', 'CSV_UPLOAD'] } },
         orderBy: { syncedAt: 'desc' },
       }),
     ]);
@@ -200,6 +252,7 @@ export class LandDashboardService implements OnModuleInit {
     }
 
     const grandTotal: MetricPair = { bookCount: 0, parcelCount: 0 };
+    const includeSpatialInAggregateTotals = query.fieldCode === 'SPATIAL_PARCELS';
     const dateMap = new Map<string, DailySummaryItem>();
     const communeMap = new Map<string, CommuneSummaryItem>();
 
@@ -211,8 +264,12 @@ export class LandDashboardService implements OnModuleInit {
       totalsByField[rec.fieldCode].bookCount += rec.bookCount;
       totalsByField[rec.fieldCode].parcelCount += rec.parcelCount;
 
-      grandTotal.bookCount += rec.bookCount;
-      grandTotal.parcelCount += rec.parcelCount;
+      const includeInAggregateTotals =
+        rec.fieldCode !== 'SPATIAL_PARCELS' || includeSpatialInAggregateTotals;
+      if (includeInAggregateTotals) {
+        grandTotal.bookCount += rec.bookCount;
+        grandTotal.parcelCount += rec.parcelCount;
+      }
 
       let dayItem = dateMap.get(dateStr);
       if (!dayItem) {
@@ -229,8 +286,10 @@ export class LandDashboardService implements OnModuleInit {
       }
       dayItem.values[rec.fieldCode].bookCount += rec.bookCount;
       dayItem.values[rec.fieldCode].parcelCount += rec.parcelCount;
-      dayItem.totalBooks += rec.bookCount;
-      dayItem.totalParcels += rec.parcelCount;
+      if (includeInAggregateTotals) {
+        dayItem.totalBooks += rec.bookCount;
+        dayItem.totalParcels += rec.parcelCount;
+      }
 
       const communeName = rec.commune.trim();
       if (communeName) {
@@ -244,8 +303,10 @@ export class LandDashboardService implements OnModuleInit {
           };
           communeMap.set(communeName, commItem);
         }
-        commItem.bookCount += rec.bookCount;
-        commItem.parcelCount += rec.parcelCount;
+        if (includeInAggregateTotals) {
+          commItem.bookCount += rec.bookCount;
+          commItem.parcelCount += rec.parcelCount;
+        }
         if (!commItem.byField[rec.fieldCode]) {
           commItem.byField[rec.fieldCode] = { bookCount: 0, parcelCount: 0 };
         }
@@ -470,12 +531,21 @@ export class LandDashboardService implements OnModuleInit {
       );
     }
 
-    return this.applyCsvRecords(
+    const mainLog = await this.applyCsvRecords(
       csvText,
       'SHEET_SYNC',
       exportUrl,
       dto.replaceExisting ?? false,
     );
+
+    if (dto.twoTierSheetUrl?.trim() || dto.vnlisSheetUrl?.trim()) {
+      await this.syncSheetModules({
+        twoTierSheetUrl: dto.twoTierSheetUrl,
+        vnlisSheetUrl: dto.vnlisSheetUrl,
+      });
+    }
+
+    return mainLog;
   }
 
   async importFromCsv(dto: ImportCsvDto): Promise<SyncLogDto> {
@@ -509,7 +579,10 @@ export class LandDashboardService implements OnModuleInit {
     await this.prisma.$transaction(async (tx) => {
       if (replaceExisting && source === 'SHEET_SYNC') {
         await tx.landStatRecord.deleteMany({
-          where: { source: 'SHEET_SYNC' },
+          where: {
+            source: 'SHEET_SYNC',
+            fieldCode: { not: 'SPATIAL_PARCELS' },
+          },
         });
       }
 
@@ -621,5 +694,104 @@ export class LandDashboardService implements OnModuleInit {
         errorMessage: msg,
       };
     }
+  }
+
+  private async fetchSheetCsvSafe(url: string): Promise<string> {
+    try {
+      const exportUrl = normalizeGoogleSheetExportUrl(url);
+      const response = await fetch(exportUrl, {
+        headers: { Accept: 'text/csv,text/plain,*/*' },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return await response.text();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Fetch error';
+      this.logger.warn(`Google Sheet module fetch error (${url}): ${msg}`);
+      return '';
+    }
+  }
+
+  async syncSheetModules(opts?: {
+    twoTierSheetUrl?: string;
+    vnlisSheetUrl?: string;
+  }): Promise<GoogleSheetModulesDto> {
+    const config = env(process.env);
+    const twoTierRaw =
+      opts?.twoTierSheetUrl?.trim() || config.twoTierSheetCsvUrl;
+    const vnlisRaw = opts?.vnlisSheetUrl?.trim() || config.vnlisSheetCsvUrl;
+    const populationUrl = opts?.vnlisSheetUrl?.trim()
+      ? normalizeGoogleSheetExportUrl(vnlisRaw, '2082395834')
+      : config.populationSheetCsvUrl;
+
+    const [twoTierCsv, vnlisCsv, populationCsv] = await Promise.all([
+      this.fetchSheetCsvSafe(twoTierRaw),
+      this.fetchSheetCsvSafe(vnlisRaw),
+      this.fetchSheetCsvSafe(populationUrl),
+    ]);
+
+    const result: GoogleSheetModulesDto = {
+      populationMatch: parsePopulationMatchCsv(populationCsv),
+      twoTierConversion: parseTwoTierConversionCsv(twoTierCsv),
+      vnlisSync: parseVnlisSyncCsv(vnlisCsv),
+      syncedAt: new Date().toISOString(),
+    };
+
+    try {
+      await this.prisma.syncLog.upsert({
+        where: { id: 'SHEET_MODULES_STATE' },
+        update: {
+          source: 'SHEET_MODULES',
+          sheetUrl: JSON.stringify({
+            twoTierSheetUrl: twoTierRaw,
+            vnlisSheetUrl: vnlisRaw,
+          }),
+          recordsSynced:
+            result.twoTierConversion.rows.length +
+            result.vnlisSync.rows.length +
+            result.populationMatch.rows.length,
+          status: 'SUCCESS',
+          message: JSON.stringify(result),
+          syncedAt: new Date(),
+        },
+        create: {
+          id: 'SHEET_MODULES_STATE',
+          source: 'SHEET_MODULES',
+          sheetUrl: JSON.stringify({
+            twoTierSheetUrl: twoTierRaw,
+            vnlisSheetUrl: vnlisRaw,
+          }),
+          recordsSynced:
+            result.twoTierConversion.rows.length +
+            result.vnlisSync.rows.length +
+            result.populationMatch.rows.length,
+          status: 'SUCCESS',
+          message: JSON.stringify(result),
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not persist SHEET_MODULES_STATE: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+    }
+
+    return result;
+  }
+
+  async getSheetModules(): Promise<GoogleSheetModulesDto> {
+    try {
+      const cached = await this.prisma.syncLog.findUnique({
+        where: { id: 'SHEET_MODULES_STATE' },
+      });
+      if (cached?.message) {
+        return JSON.parse(cached.message) as GoogleSheetModulesDto;
+      }
+    } catch {
+      // Fallback to live fetch
+    }
+    return this.syncSheetModules();
   }
 }
