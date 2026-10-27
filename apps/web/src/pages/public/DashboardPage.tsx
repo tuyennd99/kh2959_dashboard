@@ -122,7 +122,7 @@ export function DashboardPage() {
   const popRows = sheetModules?.populationMatch.rows ?? [];
   const twoTier = sheetModules?.twoTierConversion;
   const vnlis = sheetModules?.vnlisSync;
-  const fields = summary?.fields ?? [];
+  const fields = (summary?.fields ?? []).filter(item => item.code !== "STANDARDIZED_MAP_SHEETS");
   const communes = summary?.communes ?? [];
   const byDate = summary?.byDate ?? [];
   const dailyRows = [...byDate].reverse();
@@ -242,7 +242,7 @@ export function DashboardPage() {
             </Card>
           </div>
 
-          {popRows.length > 0 && (
+          {/* {popRows.length > 0 && (
             <Card className="p-5">
               <div className="mb-3">
                 <h3 className="text-base font-semibold text-foreground">
@@ -307,7 +307,7 @@ export function DashboardPage() {
                 </TableBody>
               </Table>
             </Card>
-          )}
+          )} */}
         </section>
 
         {/* =====================================================================
