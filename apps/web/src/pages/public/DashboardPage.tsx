@@ -389,7 +389,7 @@ export function DashboardPage() {
               </div>
 
               {/* Cột phải: Kết quả thực hiện từng ngày gần nhất */}
-              <div className="flex flex-col justify-between bg-secondary/35 p-5 sm:p-6 lg:col-span-7">
+              <div className="flex min-w-0 flex-col justify-between bg-secondary/35 p-5 sm:p-6 lg:col-span-7">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div>
                     <h2 className="text-sm font-semibold text-foreground">
@@ -436,9 +436,9 @@ export function DashboardPage() {
                 </div>
 
                 {/* Lưới thẻ từng ngày thực hiện có thanh tiến độ trực quan */}
-                <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-5">
-                  {byDate.slice(-5).map((day, idx, arr) => {
-                    const isLatest = idx === arr.length - 1;
+                <div className="mt-4 flex gap-2.5 overflow-x-auto pb-2 [scrollbar-width:thin]">
+                  {dailyRows.map((day, idx) => {
+                    const isLatest = idx === 0;
                     const isSelected =
                       fromDate === day.reportDate && toDate === day.reportDate;
                     const fillPct = Math.max(
@@ -451,7 +451,7 @@ export function DashboardPage() {
                         key={day.reportDate}
                         type="button"
                         onClick={() => toggleDayFilter(day.reportDate)}
-                        className="group flex cursor-pointer flex-col justify-between rounded-lg border bg-card p-3 text-left transition-all hover:border-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        className="group flex w-36 shrink-0 cursor-pointer flex-col justify-between rounded-lg border bg-card p-3 text-left transition-all hover:border-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                         style={{
                           borderColor: isSelected
                             ? "var(--series-1)"
