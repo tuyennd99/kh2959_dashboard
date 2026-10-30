@@ -84,7 +84,9 @@ describe('SheetSyncLockService', () => {
 
     await expect(service.withSheetSyncLock(work)).rejects.toThrow('sync failed');
 
-    expect(work).toHaveBeenCalledWith({ token: 41n });
+    expect(work).toHaveBeenCalledWith(
+      expect.objectContaining({ token: 41n, isActive: expect.any(Function) }),
+    );
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining('pg_advisory_unlock'),
     );
@@ -107,14 +109,17 @@ describe('SheetSyncLockService', () => {
     const loggerError = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
+    let leaseActiveAfterDisconnect: boolean | undefined;
 
     await expect(
-      service.withSheetSyncLock(async () => {
+      service.withSheetSyncLock(async (lease) => {
         onConnectionError?.(new Error('postgresql://user:secret@db.example/app'));
+        leaseActiveAfterDisconnect = (lease as { isActive?: () => boolean }).isActive?.();
         return 'must not be reported as success';
       }),
     ).rejects.toThrow('Sheet sync lock connection lost');
     expect(client.end).toHaveBeenCalledTimes(1);
+    expect(leaseActiveAfterDisconnect).toBe(false);
     expect(loggerError).toHaveBeenCalledWith('Sheet sync lock connection failed');
     loggerError.mockRestore();
   });

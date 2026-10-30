@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { Client } from 'pg';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type SyncLease = { token: bigint };
+export type SyncLease = { token: bigint; isActive: () => boolean };
 
 @Injectable()
 export class SheetSyncLockService {
@@ -13,7 +13,7 @@ export class SheetSyncLockService {
 
   async assertCurrentSheetSyncLease(
     tx: Prisma.TransactionClient,
-    lease: SyncLease,
+    lease: Pick<SyncLease, 'token'>,
   ): Promise<void> {
     const rows = await tx.$queryRaw<Array<{ token: bigint }>>`
       SELECT token FROM sheet_sync_leases WHERE id = 'sheet-sync' FOR UPDATE
@@ -40,6 +40,7 @@ export class SheetSyncLockService {
       await client.connect();
       await client.query("SELECT set_config('search_path', $1, false)", [schema]);
       await client.query("SELECT set_config('statement_timeout', $1, false)", ['5000']);
+      // ponytail: one lock serializes every Sheet write; split by source only if sync throughput needs it.
       const lock = await client.query<{ acquired: boolean }>(
         "SELECT pg_try_advisory_lock(hashtext('land-sheet-sync-v1'), 1) AS acquired",
       );
@@ -64,7 +65,7 @@ export class SheetSyncLockService {
       }
 
       if (connectionLost) throw new Error('Sheet sync lock connection lost');
-      const result = await work({ token });
+      const result = await work({ token, isActive: () => !connectionLost });
       if (connectionLost) throw new Error('Sheet sync lock connection lost');
       return result;
     } finally {

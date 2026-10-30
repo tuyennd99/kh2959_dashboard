@@ -26,6 +26,7 @@ import {
   UpsertLandRecordDto,
 } from '../dtos/land.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { SheetSyncLockService, type SyncLease } from './sheet-sync-lock.service';
 import {
   normalizeGoogleSheetExportUrl,
   parsePopulationMatchCsv,
@@ -35,6 +36,37 @@ import {
 } from '../utils/sheet-parser';
 
 export const RETIRED_FIELD_CODE = 'THREE_OLD_DISTRICTS';
+
+function sanitizeSheetUrl(input: string): string {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return '[invalid URL]';
+  }
+
+  url.username = '';
+  url.password = '';
+  url.hash = '';
+  for (const key of [...url.searchParams.keys()]) {
+    if (
+      /(token|secret|password|credential|api[-_]?key|signature|(?:^|[-_])sig(?:$|[-_])|^key$|auth)/i.test(
+        key,
+      )
+    ) {
+      url.searchParams.set(key, 'REDACTED');
+    }
+  }
+  return url.toString();
+}
+
+export type SheetSyncOrigin = 'MANUAL' | 'SCHEDULED';
+export type SyncGroupResult = Pick<SyncLogDto, 'recordsSynced' | 'status'>;
+export type DailySyncResult = {
+  main: SyncGroupResult;
+  modules: SyncGroupResult;
+  status: SyncLogDto['status'];
+};
 
 export const CORE_FIELD_DEFINITIONS = [
   {
@@ -75,7 +107,10 @@ export const CORE_FIELD_DEFINITIONS = [
 export class LandDashboardService implements OnModuleInit {
   private readonly logger = new Logger(LandDashboardService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly syncLock: SheetSyncLockService,
+  ) {}
 
   async onModuleInit() {
     for (const def of CORE_FIELD_DEFINITIONS) {
@@ -498,54 +533,213 @@ export class LandDashboardService implements OnModuleInit {
   }
 
   async syncFromGoogleSheet(dto: SyncSheetDto): Promise<SyncLogDto> {
+    const result = await this.syncLock.withSheetSyncLock((lease) =>
+      this.syncGoogleSheetLocked(dto, lease),
+    );
+    if (result === null) {
+      throw new HttpException(
+        { message: 'Đang có lượt đồng bộ Google Sheet khác' },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    return result;
+  }
+
+  async runDailySheetSync(): Promise<DailySyncResult | null> {
+    return this.syncLock.withSheetSyncLock(async (lease) => {
+      let main: SyncGroupResult;
+      try {
+        const log = await this.syncMainSheet({}, 'SCHEDULED', lease);
+        main = { recordsSynced: log.recordsSynced, status: log.status };
+      } catch {
+        main = { recordsSynced: 0, status: 'FAILED' };
+      }
+
+      let modules: SyncGroupResult = { recordsSynced: 0, status: 'FAILED' };
+      if (lease.isActive()) {
+        try {
+          const result = await this.syncSheetModulesLocked(undefined, 'SCHEDULED', lease);
+          modules = {
+            recordsSynced:
+              result.twoTierConversion.rows.length +
+              result.vnlisSync.rows.length +
+              result.populationMatch.rows.length,
+            status: 'SUCCESS',
+          };
+        } catch {
+          // The module sync already recorded its own failure.
+        }
+      }
+
+      const status =
+        main.status === 'SUCCESS' && modules.status === 'SUCCESS'
+          ? 'SUCCESS'
+          : 'FAILED';
+      const daily = { main, modules, status };
+      try {
+        await this.prisma.syncLog.create({
+          data: {
+            source: 'SHEET_DAILY',
+            recordsSynced: main.recordsSynced + modules.recordsSynced,
+            status,
+            message: JSON.stringify({ main: main.status, modules: modules.status }),
+          },
+        });
+      } catch (error) {
+        this.logger.error(
+          `Could not persist daily Sheet sync result: ${this.safeSyncError(error)}`,
+        );
+      }
+      return daily;
+    });
+  }
+
+  private async syncGoogleSheetLocked(
+    dto: SyncSheetDto,
+    lease: SyncLease,
+  ): Promise<SyncLogDto> {
+    const mainLog = await this.syncMainSheet(dto, 'MANUAL', lease);
+    if (dto.twoTierSheetUrl?.trim() || dto.vnlisSheetUrl?.trim()) {
+      await this.syncSheetModulesLocked(
+        { twoTierSheetUrl: dto.twoTierSheetUrl, vnlisSheetUrl: dto.vnlisSheetUrl },
+        'MANUAL',
+        lease,
+      );
+    }
+    return mainLog;
+  }
+
+  async syncMainSheet(
+    dto: SyncSheetDto,
+    origin: SheetSyncOrigin,
+    lease: SyncLease,
+  ): Promise<SyncLogDto> {
     const config = env(process.env);
     const rawUrl = dto.sheetUrl?.trim() || config.googleSheetCsvUrl;
     const exportUrl = normalizeGoogleSheetExportUrl(rawUrl);
+    const logUrl = sanitizeSheetUrl(exportUrl);
 
     let csvText: string;
     try {
       const response = await fetch(exportUrl, {
         headers: { Accept: 'text/csv,text/plain,*/*' },
+        signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       csvText = await response.text();
     } catch (error) {
-      const msg =
-        error instanceof Error
-          ? error.message
-          : 'Không thể tải dữ liệu từ Google Sheet';
+      const message = this.safeSyncError(error);
+      await this.logFailedSync(logUrl, origin, message);
+      throw new HttpException({ message: `Đồng bộ Google Sheet thất bại: ${message}` }, HttpStatus.BAD_GATEWAY);
+    }
+
+    const fields = await this.getFieldDefinitions();
+    const parsedRows = parseSheetCsv(csvText, fields);
+    if (parsedRows.length === 0) {
+      const message = 'Google Sheet không có dòng dữ liệu hợp lệ';
+      await this.logFailedSync(logUrl, origin, message);
+      throw new HttpException({ message }, HttpStatus.BAD_REQUEST);
+    }
+
+    try {
+      const log = await this.prisma.$transaction(async (tx) => {
+        if (!lease.isActive()) throw new Error('Sheet sync lock connection lost');
+        await this.syncLock.assertCurrentSheetSyncLease(tx, lease);
+
+        if (origin === 'MANUAL' && (dto.replaceExisting ?? false)) {
+          await tx.landStatRecord.deleteMany({
+            where: { source: 'SHEET_SYNC', fieldCode: { not: 'SPATIAL_PARCELS' } },
+          });
+        }
+
+        for (const row of parsedRows) {
+          const reportDate = new Date(`${row.reportDate}T00:00:00.000Z`);
+          await tx.landStatRecord.upsert({
+            where: {
+              reportDate_fieldCode_commune: {
+                reportDate,
+                fieldCode: row.fieldCode,
+                commune: row.commune,
+              },
+            },
+            update: {
+              bookCount: row.bookCount,
+              parcelCount: row.parcelCount,
+              source: 'SHEET_SYNC',
+            },
+            create: {
+              reportDate,
+              fieldCode: row.fieldCode,
+              commune: row.commune,
+              bookCount: row.bookCount,
+              parcelCount: row.parcelCount,
+              source: 'SHEET_SYNC',
+            },
+          });
+        }
+
+        if (origin === 'SCHEDULED') {
+          await tx.landStatRecord.deleteMany({
+            where: {
+              source: { in: ['MANUAL', 'CSV_UPLOAD'] },
+              fieldCode: { not: 'SPATIAL_PARCELS' },
+            },
+          });
+        }
+
+        return tx.syncLog.create({
+          data: {
+            source: 'SHEET_SYNC',
+            sheetUrl: logUrl,
+            recordsSynced: parsedRows.length,
+            status: 'SUCCESS',
+            message: `${origin}: đã đồng bộ ${parsedRows.length} nhóm dữ liệu`,
+          },
+        });
+      });
+
+      return {
+        id: log.id,
+        source: log.source,
+        sheetUrl: log.sheetUrl,
+        recordsSynced: log.recordsSynced,
+        status: log.status,
+        message: log.message,
+        syncedAt: log.syncedAt.toISOString(),
+      };
+    } catch (error) {
+      const message = this.safeSyncError(error);
+      await this.logFailedSync(logUrl, origin, message);
+      throw error;
+    }
+  }
+
+  private safeSyncError(error: unknown): string {
+    if (error instanceof HttpException) return 'Không thể ghi dữ liệu đồng bộ';
+    return error instanceof Error ? error.name : 'Unknown error';
+  }
+
+  private async logFailedSync(
+    sheetUrl: string,
+    origin: SheetSyncOrigin,
+    message: string,
+  ): Promise<void> {
+    try {
       await this.prisma.syncLog.create({
         data: {
           source: 'SHEET_SYNC',
-          sheetUrl: exportUrl,
+          sheetUrl,
           recordsSynced: 0,
           status: 'FAILED',
-          message: msg,
+          message: `${origin}: ${message}`,
         },
       });
-      throw new HttpException(
-        { message: `Đồng bộ Google Sheet thất bại: ${msg}` },
-        HttpStatus.BAD_GATEWAY,
-      );
+    } catch (error) {
+      this.logger.error(`Could not persist failed Sheet sync: ${this.safeSyncError(error)}`);
     }
-
-    const mainLog = await this.applyCsvRecords(
-      csvText,
-      'SHEET_SYNC',
-      exportUrl,
-      dto.replaceExisting ?? false,
-    );
-
-    if (dto.twoTierSheetUrl?.trim() || dto.vnlisSheetUrl?.trim()) {
-      await this.syncSheetModules({
-        twoTierSheetUrl: dto.twoTierSheetUrl,
-        vnlisSheetUrl: dto.vnlisSheetUrl,
-      });
-    }
-
-    return mainLog;
   }
 
   async importFromCsv(dto: ImportCsvDto): Promise<SyncLogDto> {
@@ -696,27 +890,27 @@ export class LandDashboardService implements OnModuleInit {
     }
   }
 
-  private async fetchSheetCsvSafe(url: string): Promise<string> {
-    try {
-      const exportUrl = normalizeGoogleSheetExportUrl(url);
-      const response = await fetch(exportUrl, {
-        headers: { Accept: 'text/csv,text/plain,*/*' },
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      return await response.text();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Fetch error';
-      this.logger.warn(`Google Sheet module fetch error (${url}): ${msg}`);
-      return '';
-    }
-  }
-
   async syncSheetModules(opts?: {
     twoTierSheetUrl?: string;
     vnlisSheetUrl?: string;
   }): Promise<GoogleSheetModulesDto> {
+    const result = await this.syncLock.withSheetSyncLock((lease) =>
+      this.syncSheetModulesLocked(opts, 'MANUAL', lease),
+    );
+    if (result === null) {
+      throw new HttpException(
+        { message: 'Đang có lượt đồng bộ Google Sheet khác' },
+        HttpStatus.CONFLICT,
+      );
+    }
+    return result;
+  }
+
+  private async syncSheetModulesLocked(
+    opts: { twoTierSheetUrl?: string; vnlisSheetUrl?: string } | undefined,
+    origin: SheetSyncOrigin,
+    lease: SyncLease,
+  ): Promise<GoogleSheetModulesDto> {
     const config = env(process.env);
     const twoTierRaw =
       opts?.twoTierSheetUrl?.trim() || config.twoTierSheetCsvUrl;
@@ -724,61 +918,100 @@ export class LandDashboardService implements OnModuleInit {
     const populationUrl = opts?.vnlisSheetUrl?.trim()
       ? normalizeGoogleSheetExportUrl(vnlisRaw, '2082395834')
       : config.populationSheetCsvUrl;
-
-    const [twoTierCsv, vnlisCsv, populationCsv] = await Promise.all([
-      this.fetchSheetCsvSafe(twoTierRaw),
-      this.fetchSheetCsvSafe(vnlisRaw),
-      this.fetchSheetCsvSafe(populationUrl),
-    ]);
-
-    const result: GoogleSheetModulesDto = {
-      populationMatch: parsePopulationMatchCsv(populationCsv),
-      twoTierConversion: parseTwoTierConversionCsv(twoTierCsv),
-      vnlisSync: parseVnlisSyncCsv(vnlisCsv),
-      syncedAt: new Date().toISOString(),
-    };
+    const sheetUrl = JSON.stringify({
+      twoTierSheetUrl: sanitizeSheetUrl(normalizeGoogleSheetExportUrl(twoTierRaw)),
+      vnlisSheetUrl: sanitizeSheetUrl(normalizeGoogleSheetExportUrl(vnlisRaw)),
+    });
 
     try {
-      await this.prisma.syncLog.upsert({
-        where: { id: 'SHEET_MODULES_STATE' },
-        update: {
-          source: 'SHEET_MODULES',
-          sheetUrl: JSON.stringify({
-            twoTierSheetUrl: twoTierRaw,
-            vnlisSheetUrl: vnlisRaw,
-          }),
-          recordsSynced:
-            result.twoTierConversion.rows.length +
-            result.vnlisSync.rows.length +
-            result.populationMatch.rows.length,
-          status: 'SUCCESS',
-          message: JSON.stringify(result),
-          syncedAt: new Date(),
-        },
-        create: {
-          id: 'SHEET_MODULES_STATE',
-          source: 'SHEET_MODULES',
-          sheetUrl: JSON.stringify({
-            twoTierSheetUrl: twoTierRaw,
-            vnlisSheetUrl: vnlisRaw,
-          }),
-          recordsSynced:
-            result.twoTierConversion.rows.length +
-            result.vnlisSync.rows.length +
-            result.populationMatch.rows.length,
-          status: 'SUCCESS',
-          message: JSON.stringify(result),
-        },
+      const [twoTierCsv, vnlisCsv, populationCsv] = await Promise.all([
+        this.fetchSheetCsv(twoTierRaw),
+        this.fetchSheetCsv(vnlisRaw),
+        this.fetchSheetCsv(populationUrl),
+      ]);
+      const result: GoogleSheetModulesDto = {
+        populationMatch: parsePopulationMatchCsv(populationCsv),
+        twoTierConversion: parseTwoTierConversionCsv(twoTierCsv),
+        vnlisSync: parseVnlisSyncCsv(vnlisCsv),
+        syncedAt: new Date().toISOString(),
+      };
+      if (
+        !result.twoTierConversion.rows.length ||
+        !result.vnlisSync.rows.length ||
+        !result.populationMatch.rows.length
+      ) {
+        throw new Error('Bảng Google Sheet phụ không có dòng dữ liệu hợp lệ');
+      }
+
+      const recordsSynced =
+        result.twoTierConversion.rows.length +
+        result.vnlisSync.rows.length +
+        result.populationMatch.rows.length;
+      await this.prisma.$transaction(async (tx) => {
+        if (!lease.isActive()) throw new Error('Sheet sync lock connection lost');
+        await this.syncLock.assertCurrentSheetSyncLease(tx, lease);
+        await tx.syncLog.upsert({
+          where: { id: 'SHEET_MODULES_STATE' },
+          update: {
+            source: 'SHEET_MODULES',
+            sheetUrl,
+            recordsSynced,
+            status: 'SUCCESS',
+            message: JSON.stringify(result),
+            syncedAt: new Date(),
+          },
+          create: {
+            id: 'SHEET_MODULES_STATE',
+            source: 'SHEET_MODULES',
+            sheetUrl,
+            recordsSynced,
+            status: 'SUCCESS',
+            message: JSON.stringify(result),
+          },
+        });
+        await tx.syncLog.create({
+          data: {
+            source: 'SHEET_MODULES',
+            sheetUrl,
+            recordsSynced,
+            status: 'SUCCESS',
+            message: `${origin}: đã đồng bộ ${recordsSynced} dòng`,
+          },
+        });
       });
+      return result;
     } catch (error) {
-      this.logger.warn(
-        `Could not persist SHEET_MODULES_STATE: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
+      const message = this.safeSyncError(error);
+      try {
+        await this.prisma.syncLog.create({
+          data: {
+            source: 'SHEET_MODULES',
+            sheetUrl,
+            recordsSynced: 0,
+            status: 'FAILED',
+            message: `${origin}: ${message}`,
+          },
+        });
+      } catch (logError) {
+        this.logger.error(`Could not persist failed module sync: ${this.safeSyncError(logError)}`);
+      }
+      throw new HttpException(
+        { message: 'Không thể đồng bộ đầy đủ các Google Sheet phụ' },
+        HttpStatus.BAD_GATEWAY,
       );
     }
+  }
 
-    return result;
+  private async fetchSheetCsv(url: string): Promise<string> {
+    const exportUrl = normalizeGoogleSheetExportUrl(url);
+    const response = await fetch(exportUrl, {
+      headers: { Accept: 'text/csv,text/plain,*/*' },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const csv = await response.text();
+    if (!csv.trim()) throw new Error('Empty Google Sheet response');
+    return csv;
   }
 
   async getSheetModules(): Promise<GoogleSheetModulesDto> {

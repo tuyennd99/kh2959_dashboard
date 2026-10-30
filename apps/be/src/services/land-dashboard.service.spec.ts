@@ -1,4 +1,5 @@
 import { LandDashboardService } from './land-dashboard.service';
+import type { SheetSyncLockService, SyncLease } from './sheet-sync-lock.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
 describe('LandDashboardService', () => {
@@ -63,10 +64,13 @@ describe('LandDashboardService', () => {
           },
         ]),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
+        upsert: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       syncLog: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue({}),
         create: jest.fn().mockImplementation(async ({ data }) => {
           prisma.syncLog.findUnique.mockResolvedValue(data);
           return { ...data, syncedAt: new Date() };
@@ -81,9 +85,24 @@ describe('LandDashboardService', () => {
     return prisma as unknown as PrismaService;
   }
 
+  function createDashboardService(
+    prisma: PrismaService,
+    syncLock?: SheetSyncLockService,
+  ) {
+    const defaultLock = {
+      withSheetSyncLock: async (work: (lease: SyncLease) => Promise<unknown>) =>
+        work({ token: 1n, isActive: () => true }),
+      assertCurrentSheetSyncLease: jest.fn().mockResolvedValue(undefined),
+    };
+    return new LandDashboardService(
+      prisma,
+      syncLock ?? (defaultLock as unknown as SheetSyncLockService),
+    );
+  }
+
   it('computes totalsByField, grandTotal, byDate, and byCommune accurately', async () => {
     const prisma = createMockPrisma();
-    const service = new LandDashboardService(prisma);
+    const service = createDashboardService(prisma);
     const summary = await service.getSummary({});
 
     expect(summary.grandTotal).toEqual({ bookCount: 132, parcelCount: 1032 });
@@ -130,12 +149,12 @@ describe('LandDashboardService', () => {
     (prisma.landStatRecord.createMany as jest.Mock).mockResolvedValue({
       count: 1,
     });
-    await new LandDashboardService(prisma).onModuleInit();
+    await createDashboardService(prisma).onModuleInit();
     // Later GCN records must not become new spatial records on restart.
     (prisma.landStatRecord.findMany as jest.Mock).mockResolvedValue([
       { ...sourceRecord, commune: 'Quảng Uyên', parcelCount: 2000 },
     ]);
-    await new LandDashboardService(prisma).onModuleInit();
+    await createDashboardService(prisma).onModuleInit();
 
     expect(prisma.landStatRecord.createMany).toHaveBeenCalledTimes(1);
     expect(prisma.landStatRecord.createMany).toHaveBeenCalledWith(
@@ -166,8 +185,8 @@ describe('LandDashboardService', () => {
   it('marks an empty initial snapshot complete without copying future GCN records', async () => {
     const prisma = createMockPrisma();
     (prisma.landStatRecord.findMany as jest.Mock).mockResolvedValue([]);
-    await new LandDashboardService(prisma).onModuleInit();
-    await new LandDashboardService(prisma).onModuleInit();
+    await createDashboardService(prisma).onModuleInit();
+    await createDashboardService(prisma).onModuleInit();
 
     expect(prisma.landStatRecord.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.landStatRecord.createMany).not.toHaveBeenCalled();
@@ -182,11 +201,11 @@ describe('LandDashboardService', () => {
       new Error('Copy failed'),
     );
     await expect(
-      new LandDashboardService(prisma).onModuleInit(),
+      createDashboardService(prisma).onModuleInit(),
     ).rejects.toThrow('Copy failed');
     expect(prisma.syncLog.create).not.toHaveBeenCalled();
 
-    await new LandDashboardService(prisma).onModuleInit();
+    await createDashboardService(prisma).onModuleInit();
     expect(prisma.landStatRecord.createMany).toHaveBeenCalledTimes(2);
     expect(prisma.syncLog.create).toHaveBeenCalledTimes(1);
   });
@@ -217,7 +236,7 @@ describe('LandDashboardService', () => {
       prisma.landStatRecord.update = jest.fn().mockResolvedValue(record);
       prisma.landStatRecord.delete = jest.fn().mockResolvedValue(record);
 
-      const service = new LandDashboardService(prisma);
+      const service = createDashboardService(prisma);
       await service.upsertRecord(dto);
       await service.updateRecordById(record.id, dto);
       await service.deleteRecord(record.id);
@@ -249,7 +268,7 @@ describe('LandDashboardService', () => {
       text: async () => '1,GCN Ngoài Danh Sách,18/10/2026,Độc Lập,,132,1032',
     } as Response);
     try {
-      await new LandDashboardService(prisma).syncFromGoogleSheet({
+      await createDashboardService(prisma).syncFromGoogleSheet({
         replaceExisting: true,
       });
 
@@ -307,7 +326,7 @@ describe('LandDashboardService', () => {
         ),
     );
 
-    const service = new LandDashboardService(prisma);
+    const service = createDashboardService(prisma);
     const summary = await service.getSummary({});
 
     expect(summary.totalsByField.SPATIAL_PARCELS).toEqual({
@@ -348,7 +367,7 @@ describe('LandDashboardService', () => {
 
   it('encodes Vietnamese UTF-8 branch query parameter when calling external report API', async () => {
     const prisma = createMockPrisma();
-    const service = new LandDashboardService(prisma);
+    const service = createDashboardService(prisma);
     const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -381,7 +400,7 @@ describe('LandDashboardService', () => {
 
   it('returns safe fallback when external report API fails', async () => {
     const prisma = createMockPrisma();
-    const service = new LandDashboardService(prisma);
+    const service = createDashboardService(prisma);
     const fetchSpy = jest
       .spyOn(global, 'fetch')
       .mockRejectedValue(new Error('Network timeout'));
@@ -394,7 +413,7 @@ describe('LandDashboardService', () => {
 
   it('fetches and parses Google Sheet modules (PC06, 2-tier conversion, VNLIS)', async () => {
     const prisma = createMockPrisma();
-    const service = new LandDashboardService(prisma);
+    const service = createDashboardService(prisma);
     const fetchSpy = jest
       .spyOn(global, 'fetch')
       .mockImplementation(async (input) => {
@@ -437,7 +456,13 @@ describe('LandDashboardService', () => {
     const prisma = createMockPrisma();
     prisma.syncLog.upsert = jest.fn().mockResolvedValue({});
     prisma.landStatRecord.upsert = jest.fn().mockResolvedValue({});
-    const service = new LandDashboardService(prisma);
+    const lockRunner = jest.fn(async (work) =>
+      work({ token: 1n, isActive: () => true }),
+    );
+    const service = createDashboardService(prisma, {
+      withSheetSyncLock: lockRunner,
+      assertCurrentSheetSyncLease: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SheetSyncLockService);
     const fetchSpy = jest
       .spyOn(global, 'fetch')
       .mockImplementation(async (input) => {
@@ -485,6 +510,440 @@ describe('LandDashboardService', () => {
           where: { id: 'SHEET_MODULES_STATE' },
         }),
       );
+      expect(lockRunner).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('rejects main and module sync requests while another Sheet sync owns the lock', async () => {
+    const prisma = createMockPrisma();
+    const lockRunner = jest.fn().mockResolvedValue(null);
+    const service = createDashboardService(prisma, {
+      withSheetSyncLock: lockRunner,
+      assertCurrentSheetSyncLease: jest.fn(),
+    } as unknown as SheetSyncLockService);
+    const fetchSpy = jest.spyOn(global, 'fetch');
+
+    try {
+      await expect(service.syncFromGoogleSheet({})).rejects.toThrow(
+        'Đang có lượt đồng bộ Google Sheet khác',
+      );
+      await expect(service.syncSheetModules()).rejects.toThrow(
+        'Đang có lượt đồng bộ Google Sheet khác',
+      );
+      await expect(service.getSheetModules()).rejects.toThrow(
+        'Đang có lượt đồng bộ Google Sheet khác',
+      );
+      expect(lockRunner).toHaveBeenCalledTimes(3);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('scheduled Sheet sync overwrites matching manual data and removes stale manual and CSV rows', async () => {
+    const prisma = createMockPrisma();
+    const date = new Date('2026-10-18T00:00:00.000Z');
+    const records = [
+      {
+        id: 'manual-match', reportDate: date, fieldCode: 'OWNER_MISMATCH', commune: 'Độc Lập',
+        bookCount: 7, parcelCount: 70, source: 'MANUAL', extraData: null, note: 'Keep note',
+      },
+      {
+        id: 'csv-stale', reportDate: date, fieldCode: 'OUT_OF_LIST_GCN', commune: 'Xã cũ',
+        bookCount: 4, parcelCount: 40, source: 'CSV_UPLOAD', extraData: null, note: null,
+      },
+      {
+        id: 'manual-stale', reportDate: date, fieldCode: 'STANDARDIZED_MAP_SHEETS', commune: 'Xã cũ',
+        bookCount: 5, parcelCount: 50, source: 'MANUAL', extraData: null, note: null,
+      },
+      {
+        id: 'sheet-history', reportDate: new Date('2026-10-17T00:00:00.000Z'),
+        fieldCode: 'OUT_OF_LIST_GCN', commune: 'Xã cũ', bookCount: 3, parcelCount: 30,
+        source: 'SHEET_SYNC', extraData: null, note: null,
+      },
+      {
+        id: 'spatial', reportDate: date, fieldCode: 'SPATIAL_PARCELS', commune: 'Độc Lập',
+        bookCount: 2, parcelCount: 20, source: 'SHEET_SYNC', extraData: null, note: null,
+      },
+    ];
+    (prisma.landStatRecord.findMany as jest.Mock).mockImplementation(
+      ({ where }: { where?: { source?: { in?: string[] }; fieldCode?: { not?: string } } }) =>
+        where?.source?.in
+          ? records.filter((record) =>
+              where.source!.in!.includes(record.source) &&
+              (!where.fieldCode?.not || record.fieldCode !== where.fieldCode.not),
+            )
+          : records,
+    );
+    (prisma.landStatRecord.upsert as jest.Mock).mockImplementation(
+      async ({ update }: { update: { bookCount: number; parcelCount: number; source: string } }) => {
+        Object.assign(records[0], update);
+        return records[0];
+      },
+    );
+    (prisma.landStatRecord.deleteMany as jest.Mock).mockImplementation(
+      async ({ where }: {
+        where: {
+          source?: { in?: string[] };
+          fieldCode?: { not?: string };
+          id?: { in?: string[] };
+        };
+      }) => {
+        const before = records.length;
+        for (let index = records.length - 1; index >= 0; index -= 1) {
+          const record = records[index];
+          const matchesSource = where.source?.in?.includes(record.source);
+          const matchesField = !where.fieldCode?.not || record.fieldCode !== where.fieldCode.not;
+          const matchesId = where.id?.in?.includes(record.id);
+          if ((matchesSource && matchesField) || matchesId) records.splice(index, 1);
+        }
+        return { count: before - records.length };
+      },
+    );
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '1,Sai Lệch Thông Tin,18/10/2026,Độc Lập,,12,120',
+    } as Response);
+
+    try {
+      const result = await createDashboardService(prisma).syncMainSheet({}, 'SCHEDULED', { token: 1n, isActive: () => true });
+
+      expect(result.status).toBe('SUCCESS');
+      expect(prisma.landStatRecord.deleteMany).toHaveBeenCalledWith({
+        where: {
+          source: { in: ['MANUAL', 'CSV_UPLOAD'] },
+          fieldCode: { not: 'SPATIAL_PARCELS' },
+        },
+      });
+      expect(records).toContainEqual(expect.objectContaining({
+        id: 'manual-match', source: 'SHEET_SYNC', bookCount: 12, parcelCount: 120,
+        note: 'Keep note',
+      }));
+      expect(records.map(({ id }) => id)).not.toContain('csv-stale');
+      expect(records.map(({ id }) => id)).not.toContain('manual-stale');
+      expect(records.map(({ id }) => id)).toContain('sheet-history');
+      expect(records.map(({ id }) => id)).toContain('spatial');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('keeps data when the scheduled main Sheet is unavailable or invalid', async () => {
+    const prisma = createMockPrisma();
+    const fetchSpy = jest.spyOn(global, 'fetch');
+    const service = createDashboardService(prisma);
+    const responses = [
+      { ok: false, status: 500, text: async () => '' },
+      { ok: true, status: 200, text: async () => '' },
+      { ok: true, status: 200, text: async () => 'unrecognized data' },
+    ] as Response[];
+
+    try {
+      for (const response of responses) {
+        fetchSpy.mockResolvedValueOnce(response);
+        await expect(
+          service.syncMainSheet({}, 'SCHEDULED', { token: 1n, isActive: () => true }),
+        ).rejects.toThrow();
+      }
+      fetchSpy.mockRejectedValueOnce(
+        Object.assign(new Error('request timed out'), { name: 'TimeoutError' }),
+      );
+      await expect(
+        service.syncMainSheet({}, 'SCHEDULED', { token: 1n, isActive: () => true }),
+      ).rejects.toThrow();
+
+      expect(prisma.landStatRecord.upsert).not.toHaveBeenCalled();
+      expect(prisma.landStatRecord.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.syncLog.create).toHaveBeenCalledTimes(4);
+      expect(prisma.syncLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ status: 'FAILED', recordsSynced: 0 }),
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('logs a failed main Sheet sync when the write transaction rolls back', async () => {
+    const prisma = createMockPrisma();
+    (prisma.$transaction as jest.Mock).mockRejectedValueOnce(
+      new Error('database write failed'),
+    );
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '1,Sai Lệch Thông Tin,18/10/2026,Độc Lập,,12,120',
+    } as Response);
+
+    try {
+      await expect(
+        createDashboardService(prisma).syncMainSheet({}, 'SCHEDULED', { token: 1n, isActive: () => true }),
+      ).rejects.toThrow('database write failed');
+      expect(prisma.syncLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ status: 'FAILED', recordsSynced: 0 }),
+      });
+      expect(prisma.syncLog.create).not.toHaveBeenCalledWith({
+        data: expect.objectContaining({ status: 'SUCCESS' }),
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('redacts credentials from the main Sheet URL stored in sync logs', async () => {
+    const prisma = createMockPrisma();
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '1,Sai Lệch Thông Tin,18/10/2026,Độc Lập,,12,120',
+    } as Response);
+
+    try {
+      await createDashboardService(prisma).syncMainSheet(
+        { sheetUrl: 'https://reports.example/sheet.csv?access_token=private-token' },
+        'SCHEDULED',
+        { token: 1n, isActive: () => true },
+      );
+
+      const successLog = (prisma.syncLog.create as jest.Mock).mock.calls
+        .map(([args]) => args.data)
+        .find(({ status }: { status: string }) => status === 'SUCCESS');
+      expect(successLog.sheetUrl).not.toContain('private-token');
+      expect(successLog.sheetUrl).toContain('REDACTED');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it.each(['main', 'modules'] as const)(
+    'continues the daily run when the %s group fails and logs a failed total',
+    async (failedGroup) => {
+      const prisma = createMockPrisma();
+      const lockRunner = jest.fn(async (work) =>
+        work({ token: 1n, isActive: () => true }),
+      );
+      const service = createDashboardService(prisma, {
+        withSheetSyncLock: lockRunner,
+        assertCurrentSheetSyncLease: jest.fn(),
+      } as unknown as SheetSyncLockService);
+      const mainSync = jest.spyOn(service, 'syncMainSheet');
+      const modulesResult = {
+        twoTierConversion: { rows: [{}, {}] },
+        vnlisSync: { rows: [{}] },
+        populationMatch: { rows: [{}] },
+      };
+      const moduleSync = jest.fn().mockImplementation(
+        failedGroup === 'modules'
+          ? async () => { throw new Error('module sync failed'); }
+          : async () => modulesResult,
+      );
+      Object.defineProperty(service, 'syncSheetModulesLocked', { value: moduleSync });
+      if (failedGroup === 'main') mainSync.mockRejectedValueOnce(new Error('main sync failed'));
+      else mainSync.mockResolvedValueOnce({ recordsSynced: 2, status: 'SUCCESS' } as never);
+
+      const result = await service.runDailySheetSync();
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        main: { status: failedGroup === 'main' ? 'FAILED' : 'SUCCESS' },
+        modules: { status: failedGroup === 'modules' ? 'FAILED' : 'SUCCESS' },
+      });
+      expect(mainSync).toHaveBeenCalledTimes(1);
+      expect(moduleSync).toHaveBeenCalledTimes(1);
+      expect(lockRunner).toHaveBeenCalledTimes(1);
+      expect(prisma.syncLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ source: 'SHEET_DAILY', status: 'FAILED' }),
+      });
+    },
+  );
+
+  it('skips module fetches when the lock connection was lost after the main group', async () => {
+    const prisma = createMockPrisma();
+    const lease = { token: 1n, isActive: jest.fn().mockReturnValue(false) };
+    const lockRunner = jest.fn(async (work) => work(lease));
+    const service = createDashboardService(prisma, {
+      withSheetSyncLock: lockRunner,
+      assertCurrentSheetSyncLease: jest.fn(),
+    } as unknown as SheetSyncLockService);
+    jest.spyOn(service, 'syncMainSheet').mockResolvedValue({
+      recordsSynced: 2,
+      status: 'SUCCESS',
+    } as never);
+    const moduleSync = jest.fn();
+    Object.defineProperty(service, 'syncSheetModulesLocked', { value: moduleSync });
+
+    const result = await service.runDailySheetSync();
+
+    expect(result).toMatchObject({
+      status: 'FAILED',
+      main: { status: 'SUCCESS' },
+      modules: { status: 'FAILED' },
+    });
+    expect(moduleSync).not.toHaveBeenCalled();
+  });
+
+  it('marks the daily run successful only when both groups succeed', async () => {
+    const prisma = createMockPrisma();
+    const service = createDashboardService(prisma);
+    jest.spyOn(service, 'syncMainSheet').mockResolvedValue({
+      recordsSynced: 2,
+      status: 'SUCCESS',
+    } as never);
+    Object.defineProperty(service, 'syncSheetModulesLocked', {
+      value: jest.fn().mockResolvedValue({
+        twoTierConversion: { rows: [{}] },
+        vnlisSync: { rows: [{}] },
+        populationMatch: { rows: [{}] },
+      }),
+    });
+
+    const result = await service.runDailySheetSync();
+
+    expect(result).toMatchObject({
+      status: 'SUCCESS',
+      main: { recordsSynced: 2, status: 'SUCCESS' },
+      modules: { recordsSynced: 3, status: 'SUCCESS' },
+    });
+    expect(prisma.syncLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        source: 'SHEET_DAILY',
+        recordsSynced: 5,
+        status: 'SUCCESS',
+      }),
+    });
+  });
+
+  it('does not write a daily summary when another instance holds the lock', async () => {
+    const prisma = createMockPrisma();
+    const lockRunner = jest.fn().mockResolvedValue(null);
+    const service = createDashboardService(prisma, {
+      withSheetSyncLock: lockRunner,
+      assertCurrentSheetSyncLease: jest.fn(),
+    } as unknown as SheetSyncLockService);
+
+    await expect(service.runDailySheetSync()).resolves.toBeNull();
+
+    expect(lockRunner).toHaveBeenCalledTimes(1);
+    expect(prisma.syncLog.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps the previous module cache when any linked Sheet is invalid or unavailable', async () => {
+    const prisma = createMockPrisma();
+    const previous = {
+      twoTierConversion: { rows: [{ stt: 1, commune: 'Trà Lĩnh', parcelCount: 86 }], totalParcels: 86 },
+      vnlisSync: { rows: [], totals: { extractedIlis: 0, signedXml: 0, pushedVnlis: 0, vnlisAddedResult: 0 } },
+      populationMatch: { rows: [], totals: { sentPc06: 0, receivedMatched: 0, pushedOwnerInfo: 0, pushedPopulationParcels: 0, matchedProvinceWide: 1, unmatchedProvinceWide: 0, totalParcels: 1, matchedRate: '100%', unmatchedRate: '0%' } },
+      syncedAt: '2026-10-29T00:00:00.000Z',
+    };
+    (prisma.syncLog.findUnique as jest.Mock).mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        where.id === 'SHEET_MODULES_STATE'
+          ? { id: 'SHEET_MODULES_STATE', message: JSON.stringify(previous) }
+          : null,
+    );
+    prisma.syncLog.upsert = jest.fn();
+    prisma.syncLog.create = jest.fn().mockResolvedValue({});
+    const fetchSpy = jest.spyOn(global, 'fetch');
+    const sources = [
+      ['two-tier', '1SOaLTftRmFtYw937R6NIIHewdDEFJG3sSUf0azaSkNI'],
+      ['vnlis', 'gid=1037546126'],
+      ['population', 'gid=2082395834'],
+    ] as const;
+    const validCsv = {
+      twoTier: 'STT,Tên xã,Số thửa\n1,Trà Lĩnh,86',
+      vnlis: 'STT,Tên xã,Trích xuất từ iLIS,Ký số XML,Đẩy VNLIS,Kết quả VNLIS tăng thêm\n1,Trà Lĩnh,10,10,10,10',
+      population: 'STT,Tên xã,Gửi PC06/xã,Nhận đã đối khớp,Đẩy thông tin chủ,Đẩy thông tin dân cư (theo thửa),\"Đã đối khớp thành công, toàn tỉnh\",\"Chưa khớp, chưa đủ điều kiện, toàn tỉnh\",Tổng thửa,Tỉ lệ đối khớp thành công (%),\"Tỉ lệ chưa khớp, chưa đủ ĐK (%)\"\n1,Trà Lĩnh,1,1,1,1,1,1,2,50%,50%',
+    };
+    const failures = [
+      ['HTTP 500', 'http'],
+      ['empty response', 'empty'],
+      ['HTML login page', 'html'],
+      ['malformed CSV', 'malformed'],
+      ['timeout', 'timeout'],
+    ] as const;
+
+    try {
+      const service = createDashboardService(prisma);
+      for (const [sourceName, sourceUrl] of sources) {
+        for (const [failureName, failureMode] of failures) {
+          fetchSpy.mockImplementation(async (input) => {
+            const url = String(input);
+            const isFailureSource = url.includes(sourceUrl);
+            if (isFailureSource) {
+              if (failureMode === 'timeout') throw new Error('request timed out');
+              const text = failureMode === 'empty'
+                ? ''
+                : failureMode === 'html'
+                  ? '<html><title>Login</title></html>'
+                  : failureMode === 'malformed'
+                    ? 'malformed'
+                    : '';
+              return {
+                ok: failureMode !== 'http',
+                status: failureMode === 'http' ? 500 : 200,
+                text: async () => text,
+              } as Response;
+            }
+            const body = url.includes(sources[0][1])
+              ? validCsv.twoTier
+              : url.includes(sources[1][1])
+                ? validCsv.vnlis
+                : validCsv.population;
+            return { ok: true, text: async () => body } as Response;
+          });
+
+          try {
+            await expect(service.syncSheetModules()).rejects.toThrow(
+              'Không thể đồng bộ đầy đủ các Google Sheet phụ',
+            );
+            expect(prisma.syncLog.upsert).not.toHaveBeenCalled();
+            expect(await service.getSheetModules()).toMatchObject(previous);
+          } catch (error) {
+            throw new Error(`${sourceName} ${failureName}: ${String(error)}`);
+          }
+        }
+      }
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('preserves the module cache when its database transaction fails', async () => {
+    const prisma = createMockPrisma();
+    const previous = {
+      twoTierConversion: { rows: [{ stt: 1, commune: 'Trà Lĩnh', parcelCount: 86 }], totalParcels: 86 },
+      vnlisSync: { rows: [], totals: { extractedIlis: 0, signedXml: 0, pushedVnlis: 0, vnlisAddedResult: 0 } },
+      populationMatch: { rows: [], totals: { sentPc06: 0, receivedMatched: 0, pushedOwnerInfo: 0, pushedPopulationParcels: 0, matchedProvinceWide: 1, unmatchedProvinceWide: 0, totalParcels: 1, matchedRate: '100%', unmatchedRate: '0%' } },
+      syncedAt: '2026-10-29T00:00:00.000Z',
+    };
+    (prisma.syncLog.findUnique as jest.Mock).mockResolvedValue({
+      id: 'SHEET_MODULES_STATE', message: JSON.stringify(previous),
+    });
+    prisma.syncLog.upsert = jest.fn();
+    prisma.syncLog.create = jest.fn().mockResolvedValue({});
+    (prisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('database write failed'));
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('1SOaLTftRmFtYw937R6NIIHewdDEFJG3sSUf0azaSkNI')) {
+        return { ok: true, text: async () => 'STT,Tên xã,Số thửa\n1,Trà Lĩnh,86' } as Response;
+      }
+      if (url.includes('gid=1037546126')) {
+        return { ok: true, text: async () => 'STT,Tên xã,Trích xuất từ iLIS,Ký số XML,Đẩy VNLIS,Kết quả VNLIS tăng thêm\n1,Trà Lĩnh,10,10,10,10' } as Response;
+      }
+      return {
+        ok: true,
+        text: async () => 'STT,Tên xã,Gửi PC06/xã,Nhận đã đối khớp,Đẩy thông tin chủ,Đẩy thông tin dân cư (theo thửa),\"Đã đối khớp thành công, toàn tỉnh\",\"Chưa khớp, chưa đủ điều kiện, toàn tỉnh\",Tổng thửa,Tỉ lệ đối khớp thành công (%),\"Tỉ lệ chưa khớp, chưa đủ ĐK (%)\"\n1,Trà Lĩnh,1,1,1,1,1,1,2,50%,50%',
+      } as Response;
+    });
+
+    try {
+      const service = createDashboardService(prisma);
+      await expect(service.syncSheetModules()).rejects.toThrow(
+        'Không thể đồng bộ đầy đủ các Google Sheet phụ',
+      );
+      expect(prisma.syncLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ source: 'SHEET_MODULES', status: 'FAILED' }),
+      });
+      expect(await service.getSheetModules()).toMatchObject(previous);
     } finally {
       fetchSpy.mockRestore();
     }
