@@ -842,11 +842,19 @@ export class LandDashboardService implements OnModuleInit {
 
   async getExternalReport(
     branch?: string,
+    date?: string,
   ): Promise<ExternalChuanHoaReportDto> {
     const { chuanHoaApiUrl, chuanHoaApiToken } = env(process.env);
     const trimmedBranch = branch?.trim() ?? '';
-    const targetUrl = trimmedBranch
-      ? `${chuanHoaApiUrl}?branch=${encodeURIComponent(trimmedBranch)}`
+    const params = new URLSearchParams();
+    if (trimmedBranch) params.set('branch', trimmedBranch);
+    if (date) {
+      const reportDate = date.split('-').reverse().join('/');
+      params.set('date_from', reportDate);
+      params.set('date_to', reportDate);
+    }
+    const targetUrl = params.size
+      ? `${chuanHoaApiUrl}?${params.toString().replace(/\+/g, '%20')}`
       : chuanHoaApiUrl;
 
     try {

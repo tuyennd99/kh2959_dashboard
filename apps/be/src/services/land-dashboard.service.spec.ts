@@ -398,6 +398,31 @@ describe('LandDashboardService', () => {
     fetchSpy.mockRestore();
   });
 
+  it('requests an external report for one date and branch', async () => {
+    const service = createDashboardService(createMockPrisma());
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        generated_at: '2026-10-28 16:50:01',
+        files: { total: 10, da_chuan: 10, chua_chuan: 0, bo_qua: 0 },
+        folders: { total: 2, da_chuan: 2, chua_chuan: 0, bo_qua: 0 },
+        boxes: { total: 1 },
+        gcn_total: 3,
+        branches: [],
+        branch: 'VPĐKĐĐ KV Hà Quảng',
+      }),
+    } as Response);
+
+    await service.getExternalReport('VPĐKĐĐ KV Hà Quảng', '2026-10-26');
+
+    const requestedUrl = new URL(String(fetchSpy.mock.calls[0][0]));
+    expect(requestedUrl.search).toContain('date_from=');
+    expect(requestedUrl.searchParams.get('branch')).toBe('VPĐKĐĐ KV Hà Quảng');
+    expect(requestedUrl.searchParams.get('date_from')).toBe('26/10/2026');
+    expect(requestedUrl.searchParams.get('date_to')).toBe('26/10/2026');
+    fetchSpy.mockRestore();
+  });
+
   it('returns safe fallback when external report API fails', async () => {
     const prisma = createMockPrisma();
     const service = createDashboardService(prisma);

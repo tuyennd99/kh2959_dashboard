@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { parseDate } from "@internationalized/date";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
-  Archive,
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
   ArrowDownRight,
   ArrowUpRight,
   FilePenLine,
-  CheckCircle2,
   FileCheck2,
   FolderKanban,
   RefreshCw,
@@ -38,6 +40,11 @@ import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { DeferredDatePicker } from "../../components/ui/deferred-date-picker";
+import { messageOf } from "../../lib/api-error";
+import {
+  getDefaultExternalReportRange,
+  listExternalReportDates,
+} from "../../lib/external-report-dates";
 import {
   Select,
   SelectContent,
@@ -61,6 +68,7 @@ import {
 } from "../../components/ui/tabs";
 
 export function DashboardPage() {
+  const queryClient = useQueryClient();
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   const [fieldCode, setFieldCode] = useState<string>("ALL");
@@ -68,6 +76,19 @@ export function DashboardPage() {
   const [search, setSearch] = useState<string>("");
   const [page, setPage] = useState<number>(1);
   const [branch, setBranch] = useState<string>("");
+  const [externalDateRange, setExternalDateRange] = useState(
+    getDefaultExternalReportRange,
+  );
+  const externalDates =
+    externalDateRange.from && externalDateRange.to
+      ? listExternalReportDates(externalDateRange.from, externalDateRange.to)
+      : null;
+  const externalQueryKey = [
+    "external-report",
+    branch,
+    externalDateRange.from,
+    externalDateRange.to,
+  ] as const;
   const [dailyPage, setDailyPage] = useState<number>(1);
   const [dailyPageSize, setDailyPageSize] = useState<number>(10);
   const [recordsPageSize, setRecordsPageSize] = useState<number>(10);
@@ -105,9 +126,28 @@ export function DashboardPage() {
   });
 
   const externalQuery = useQuery({
-    queryKey: ["external-report", branch],
-    queryFn: () => fetchExternalReport(branch || undefined),
-    placeholderData: keepPreviousData,
+    queryKey: externalQueryKey,
+    queryFn: async ({ signal }) => {
+      const rows: Array<{
+        date: string;
+        report?: Awaited<ReturnType<typeof fetchExternalReport>>;
+        error?: string;
+      }> = [];
+      for (const date of externalDates ?? []) {
+        try {
+          rows.push({
+            date,
+            report: await fetchExternalReport(branch || undefined, date, signal),
+          });
+        } catch (error) {
+          if (signal.aborted) throw error;
+          rows.push({ date, error: messageOf(error) });
+        }
+        queryClient.setQueryData(externalQueryKey, rows.slice());
+      }
+      return rows;
+    },
+    enabled: Boolean(externalDates?.length),
   });
 
   const sheetModulesQuery = useQuery({
@@ -138,7 +178,12 @@ export function DashboardPage() {
   );
   const records = recordsQuery.data?.data ?? [];
   const recordsMeta = recordsQuery.data?.meta;
-  const ext = externalQuery.data;
+  const ext = externalQuery.data?.find(
+    (row) => row.report?.branches.length,
+  )?.report;
+  const externalRowsByDate = new Map(
+    externalQuery.data?.map((row) => [row.date, row]) ?? [],
+  );
 
   const latestDay = byDate.length > 0 ? byDate[byDate.length - 1] : null;
   const prevDay = byDate.length > 1 ? byDate[byDate.length - 2] : null;
@@ -1311,7 +1356,7 @@ export function DashboardPage() {
               variant="outline"
               size="sm"
               onClick={() => void externalQuery.refetch()}
-              disabled={externalQuery.isFetching}
+              disabled={externalQuery.isFetching || !externalDates}
             >
               <RefreshCw
                 className={`size-3.5 ${externalQuery.isFetching ? "animate-spin" : ""}`}
@@ -1320,34 +1365,106 @@ export function DashboardPage() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="p-4">
-              <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-                <span>Tổng số GCN</span>
-                <CheckCircle2 className="size-4 text-primary" />
-              </div>
-              <p className="mt-2 text-2xl font-bold text-foreground">
-                {formatNumber(ext?.gcn_total ?? 0)}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {branch || "Toàn bộ chi nhánh VPĐKĐĐ"}
-              </p>
-            </Card>
+          <div className="flex flex-wrap items-end gap-3">
+            <DeferredDatePicker
+              label="Từ ngày"
+              className="min-w-44"
+              value={
+                externalDateRange.from
+                  ? parseDate(externalDateRange.from)
+                  : null
+              }
+              onChange={(date) =>
+                setExternalDateRange((range) => ({
+                  ...range,
+                  from: date?.toString() ?? "",
+                }))
+              }
+            />
+            <DeferredDatePicker
+              label="Đến ngày"
+              className="min-w-44"
+              value={
+                externalDateRange.to ? parseDate(externalDateRange.to) : null
+              }
+              onChange={(date) =>
+                setExternalDateRange((range) => ({
+                  ...range,
+                  to: date?.toString() ?? "",
+                }))
+              }
+            />
+          </div>
 
-            <Card className="p-4">
-              <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-                <span>Tổng số hộp hồ sơ</span>
-                <Archive className="size-4 text-primary" />
-              </div>
-              <p className="mt-2 text-2xl font-bold text-foreground">
-                {formatNumber(ext?.boxes.total ?? 0)}
+          {externalDates === null &&
+            externalDateRange.from &&
+            externalDateRange.to && (
+              <p className="text-sm text-destructive" role="alert">
+                Chọn khoảng ngày hợp lệ, tối đa 31 ngày.
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Hộp tài liệu lưu trữ đã quét
-              </p>
-            </Card>
+            )}
+          {(!externalDateRange.from || !externalDateRange.to) && (
+            <p className="text-sm text-muted-foreground">
+              Chọn ngày bắt đầu và kết thúc.
+            </p>
+          )}
 
-            {/* <div className="rounded-xl border bg-card p-4">
+          <Card className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Ngày</TableHead>
+                  <TableHead className="text-right">Tổng GCN</TableHead>
+                  <TableHead className="text-right">Tổng hộp</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {externalDates?.slice().reverse().map((date) => {
+                  const result = externalRowsByDate.get(date);
+                  const report = result?.report;
+                  const errorMessage =
+                    result?.error ??
+                    (report?.available === false
+                      ? report.errorMessage || "Không thể tải dữ liệu ngày này."
+                      : undefined);
+                  const isLoading = !result && externalQuery.isFetching;
+                  const isAvailable = report && report.available !== false;
+
+                  return (
+                    <TableRow key={date}>
+                      <TableCell>
+                        {formatFullDate(date)}
+                        {errorMessage && (
+                          <p
+                            className="mt-1 text-xs text-destructive"
+                            role="alert"
+                          >
+                            {errorMessage}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {isLoading
+                          ? "Đang tải…"
+                          : isAvailable
+                            ? formatNumber(report.gcn_total)
+                            : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {isLoading
+                          ? "Đang tải…"
+                          : isAvailable
+                            ? formatNumber(report.boxes.total)
+                            : "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Card>
+
+          {/* <div className="rounded-xl border bg-card p-4">
               <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
                 <span>Tệp tài liệu đã chuẩn</span>
                 <FileCheck2 className="size-4 text-primary" />
@@ -1378,7 +1495,6 @@ export function DashboardPage() {
                 Chưa chuẩn: {formatNumber(ext?.folders.chua_chuan ?? 0)}
               </p>
             </div> */}
-          </div>
 
           {/* {ext && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

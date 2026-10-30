@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
     build: {
       rolldownOptions: {
         output: {
+          // Manual vendor chunks must preserve source module execution order.
+          strictExecutionOrder: true,
           codeSplitting: {
             groups: [
               {

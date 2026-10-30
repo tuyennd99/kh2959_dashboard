@@ -27,7 +27,7 @@ export class DashboardController {
 
   @Get('external-report')
   getExternalReport(@Query() query: ExternalReportQueryDto) {
-    return this.dashboardService.getExternalReport(query.branch);
+    return this.dashboardService.getExternalReport(query.branch, query.date);
   }
 
   @Get('sheet-modules')

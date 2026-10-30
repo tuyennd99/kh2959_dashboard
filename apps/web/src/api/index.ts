@@ -45,11 +45,17 @@ export async function fetchFieldDefinitions() {
   return res.data;
 }
 
-export async function fetchExternalReport(branch?: string) {
+export async function fetchExternalReport(
+  branch?: string,
+  date?: string,
+  signal?: AbortSignal,
+) {
   const res = await requestJson<ExternalChuanHoaReportDto>({
     method: 'GET',
     url: '/dashboard/external-report',
-    params: branch ? { branch } : undefined,
+    params: branch || date ? { branch, date } : undefined,
+    // ponytail: abort stops queued days; propagate disconnect upstream if strict cancellation is needed.
+    signal,
   });
   return res.data;
 }
