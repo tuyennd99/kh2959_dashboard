@@ -126,21 +126,53 @@ export function normalizeGoogleSheetExportUrl(
 export function parseSheetCsv(
   csvText: string,
   fieldDefs: FieldMatcherInput[],
+  options: { authoritative?: boolean } = {},
 ): AggregatedSheetRow[] {
   const lines = csvText
     .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+    .map((line, index) => ({ line: line.trim(), lineNumber: index + 1 }))
+    .filter(({ line }) => Boolean(line));
 
   const grouped = new Map<string, AggregatedSheetRow>();
 
-  for (const line of lines) {
+  for (const { line, lineNumber } of lines) {
     const cols = parseCsvLine(line);
+    const first = normalizeKey(cols[0] ?? '');
+    const second = normalizeKey(cols[1] ?? '');
+    const rawType = cols[1] ?? '';
+    const rawDate = cols[2] ?? '';
+    const isTotal = first.includes('TỔNG CỘNG') || second.includes('TỔNG CỘNG');
+    const isHeader = first === 'STT' || second === 'LOẠI DỮ LIỆU';
+    const stt = (cols[0] ?? '').trim();
+    const isNumberedRow = /^\d+$/.test(stt) && Number(stt) > 0;
+
+    if (options.authoritative && !isTotal && !isHeader) {
+      const reportDate = parseDateToIso(rawDate);
+      const fieldCode = resolveFieldCode(rawType, fieldDefs);
+      const isRetiredField = normalizeKey(rawType) === 'BA HUYỆN CŨ';
+      const looksLikeData = Boolean(reportDate || fieldCode || isNumberedRow);
+
+      if (looksLikeData) {
+        const hasValidDate = reportDate !== null && isValidSheetDate(reportDate);
+        const validCount = (raw: string | undefined) =>
+          !raw?.trim() || /^\d[\d.,\s]*$/.test(raw.trim()) || /^[-–—]$/.test(raw.trim());
+
+        if (
+          !isNumberedRow ||
+          cols.length < 7 ||
+          !hasValidDate ||
+          (!fieldCode && !isRetiredField) ||
+          !validCount(cols[5]) ||
+          !validCount(cols[6])
+        ) {
+          throw new Error(`Invalid Google Sheet row ${lineNumber}`);
+        }
+      }
+    }
+
     if (cols.length < 6) continue;
 
     // Expected columns: STT (0), LOẠI DỮ LIỆU (1), NGÀY THỰC HIỆN (2), XÃ (3), NGƯỜI LÀM (4 - ignored), SỐ SỔ (5), SỐ THỬA (6)
-    const rawType = cols[1] ?? '';
-    const rawDate = cols[2] ?? '';
     const rawCommune = (cols[3] ?? '').trim();
     // cols[4] is NGƯỜI LÀM -> explicitly ignored per requirement
     const rawBooks = cols[5];
@@ -154,7 +186,7 @@ export function parseSheetCsv(
 
     const bookCount = parseFormattedInt(rawBooks);
     const parcelCount = parseFormattedInt(rawParcels);
-    if (bookCount === 0 && parcelCount === 0) continue;
+    if (!options.authoritative && bookCount === 0 && parcelCount === 0) continue;
 
     const mapKey = `${reportDate}__${fieldCode}__${rawCommune}`;
     const existing = grouped.get(mapKey);
@@ -173,6 +205,11 @@ export function parseSheetCsv(
   }
 
   return Array.from(grouped.values());
+}
+
+function isValidSheetDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 export function parseTwoTierConversionCsv(

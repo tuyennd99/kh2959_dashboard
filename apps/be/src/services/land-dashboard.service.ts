@@ -48,6 +48,12 @@ function sanitizeSheetUrl(input: string): string {
   url.username = '';
   url.password = '';
   url.hash = '';
+  if (
+    url.hostname !== 'docs.google.com' ||
+    !/^\/spreadsheets\/d\/[a-zA-Z0-9_-]+(?:\/|$)/.test(url.pathname)
+  ) {
+    url.pathname = '/redacted';
+  }
   for (const key of [...url.searchParams.keys()]) {
     if (
       /(token|secret|password|credential|api[-_]?key|signature|(?:^|[-_])sig(?:$|[-_])|^key$|auth)/i.test(
@@ -636,12 +642,19 @@ export class LandDashboardService implements OnModuleInit {
       throw new HttpException({ message: `Đồng bộ Google Sheet thất bại: ${message}` }, HttpStatus.BAD_GATEWAY);
     }
 
-    const fields = await this.getFieldDefinitions();
-    const parsedRows = parseSheetCsv(csvText, fields);
-    if (parsedRows.length === 0) {
-      const message = 'Google Sheet không có dòng dữ liệu hợp lệ';
-      await this.logFailedSync(logUrl, origin, message);
-      throw new HttpException({ message }, HttpStatus.BAD_REQUEST);
+    let parsedRows: ReturnType<typeof parseSheetCsv>;
+    try {
+      const fields = await this.getFieldDefinitions();
+      parsedRows = parseSheetCsv(csvText, fields, { authoritative: true });
+      if (parsedRows.length === 0) {
+        throw new HttpException(
+          { message: 'Google Sheet không có dòng dữ liệu hợp lệ' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    } catch (error) {
+      await this.logFailedSync(logUrl, origin, this.safeSyncError(error));
+      throw error;
     }
 
     try {
@@ -718,7 +731,6 @@ export class LandDashboardService implements OnModuleInit {
   }
 
   private safeSyncError(error: unknown): string {
-    if (error instanceof HttpException) return 'Không thể ghi dữ liệu đồng bộ';
     return error instanceof Error ? error.name : 'Unknown error';
   }
 

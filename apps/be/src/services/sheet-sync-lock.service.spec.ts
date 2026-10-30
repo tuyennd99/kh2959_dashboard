@@ -104,6 +104,24 @@ describe('SheetSyncLockService', () => {
     ).rejects.toThrow('Sheet sync lease expired');
   });
 
+  it('sets the Prisma transaction search path before checking a custom-schema lease', async () => {
+    process.env.DATABASE_URL = lockUrl.replace('schema=public', 'schema=sheet_sync_test');
+    const service = new SheetSyncLockService(prisma);
+
+    await prisma.$transaction((transaction) =>
+      service.assertCurrentSheetSyncLease(transaction, { token: 40n }),
+    );
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw.mock.calls[0][0].join('')).toContain(
+      "set_config('search_path', quote_ident(",
+    );
+    expect(tx.$queryRaw.mock.calls[0][1]).toBe('sheet_sync_test');
+    expect(tx.$queryRaw.mock.calls[1][0].join('')).toContain(
+      'FROM sheet_sync_leases',
+    );
+  });
+
   it('fails the active run when the lock connection is lost', async () => {
     const service = new SheetSyncLockService(prisma);
     const loggerError = jest
@@ -129,7 +147,31 @@ describe('SheetSyncLockService', () => {
 
     await expect(
       new SheetSyncLockService(prisma).withSheetSyncLock(async () => 'unused'),
-    ).rejects.toThrow('SHEET_SYNC_LOCK_DATABASE_URL must target DATABASE_URL');
+    ).rejects.toThrow(
+      'SHEET_SYNC_LOCK_DATABASE_URL must use the same connection endpoint and database as DATABASE_URL',
+    );
     expect(Client).not.toHaveBeenCalled();
+  });
+
+  it('requires the same connection endpoint even when the database name matches', async () => {
+    process.env.DATABASE_URL = lockUrl.replace('localhost:5432', 'pooler.example:6543');
+
+    await expect(
+      new SheetSyncLockService(prisma).withSheetSyncLock(async () => 'unused'),
+    ).rejects.toThrow('same connection endpoint and database');
+    expect(Client).not.toHaveBeenCalled();
+  });
+
+  it('quotes custom schema names on the PostgreSQL lock connection', async () => {
+    const customUrl = lockUrl.replace('schema=public', 'schema=sheet-sync-test');
+    process.env.DATABASE_URL = customUrl;
+    process.env.SHEET_SYNC_LOCK_DATABASE_URL = customUrl;
+
+    await new SheetSyncLockService(prisma).withSheetSyncLock(async () => 'done');
+
+    expect(client.query).toHaveBeenCalledWith(
+      "SELECT set_config('search_path', quote_ident($1), false)",
+      ['sheet-sync-test'],
+    );
   });
 });

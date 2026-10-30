@@ -89,6 +89,31 @@ describe('parseSheetCsv', () => {
     ]);
   });
 
+  it('keeps valid zero-count keys when parsing an authoritative Sheet snapshot', () => {
+    const csv = `STT,LOẠI DỮ LIỆU,NGÀY THỰC HIỆN,XÃ,NGƯỜI LÀM,SỐ SỔ,SỐ THỬA
+1,SAI LỆCH THÔNG TIN,18/10/2026,Độc Lập,,0,0`;
+
+    expect(parseSheetCsv(csv, DEFAULT_FIELDS, { authoritative: true })).toEqual([
+      {
+        reportDate: '2026-10-18',
+        fieldCode: 'OWNER_MISMATCH',
+        commune: 'Độc Lập',
+        bookCount: 0,
+        parcelCount: 0,
+      },
+    ]);
+  });
+
+  it('rejects malformed numbered rows in an authoritative Sheet snapshot', () => {
+    const csv = `STT,LOẠI DỮ LIỆU,NGÀY THỰC HIỆN,XÃ,NGƯỜI LÀM,SỐ SỔ,SỐ THỬA
+1,SAI LỆCH THÔNG TIN,18/10/2026,Độc Lập,,12,120
+2,SAI LỆCH THÔNG TIN,invalid date,Trà Lĩnh,,5,50`;
+
+    expect(() =>
+      parseSheetCsv(csv, DEFAULT_FIELDS, { authoritative: true }),
+    ).toThrow('Invalid Google Sheet row 3');
+  });
+
   it('normalizes Google Sheets edit links to CSV export URLs', () => {
     const editUrl =
       'https://docs.google.com/spreadsheets/d/16WlVI8xzoxudlmCW7hiMsnynFEr1dNhXuPUBW4XmvzY/edit?gid=982199452#gid=982199452';

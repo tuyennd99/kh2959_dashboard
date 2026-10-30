@@ -665,6 +665,64 @@ describe('LandDashboardService', () => {
     }
   });
 
+  it('rejects a partial main Sheet snapshot before deleting records', async () => {
+    const prisma = createMockPrisma();
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () =>
+        'STT,LOẠI DỮ LIỆU,NGÀY THỰC HIỆN,XÃ,NGƯỜI LÀM,SỐ SỔ,SỐ THỬA\n' +
+        '1,SAI LỆCH THÔNG TIN,18/10/2026,Độc Lập,,12,120\n' +
+        '2,SAI LỆCH THÔNG TIN,invalid date,Trà Lĩnh,,5,50',
+    } as Response);
+
+    try {
+      await expect(
+        createDashboardService(prisma).syncMainSheet(
+          {},
+          'SCHEDULED',
+          { token: 1n, isActive: () => true },
+        ),
+      ).rejects.toThrow();
+
+      expect(prisma.landStatRecord.upsert).not.toHaveBeenCalled();
+      expect(prisma.landStatRecord.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.syncLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ source: 'SHEET_SYNC', status: 'FAILED' }),
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('logs a main Sheet failure when loading field metadata fails', async () => {
+    const prisma = createMockPrisma();
+    (prisma.fieldDefinition.findMany as jest.Mock).mockRejectedValueOnce(
+      new Error('metadata database unavailable'),
+    );
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '1,SAI LỆCH THÔNG TIN,18/10/2026,Độc Lập,,12,120',
+    } as Response);
+
+    try {
+      await expect(
+        createDashboardService(prisma).syncMainSheet(
+          {},
+          'SCHEDULED',
+          { token: 1n, isActive: () => true },
+        ),
+      ).rejects.toThrow('metadata database unavailable');
+
+      expect(prisma.landStatRecord.upsert).not.toHaveBeenCalled();
+      expect(prisma.landStatRecord.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.syncLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ source: 'SHEET_SYNC', status: 'FAILED' }),
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('logs a failed main Sheet sync when the write transaction rolls back', async () => {
     const prisma = createMockPrisma();
     (prisma.$transaction as jest.Mock).mockRejectedValueOnce(
@@ -699,7 +757,10 @@ describe('LandDashboardService', () => {
 
     try {
       await createDashboardService(prisma).syncMainSheet(
-        { sheetUrl: 'https://reports.example/sheet.csv?access_token=private-token' },
+        {
+          sheetUrl:
+            'https://reports.example/path-secret/sheet.csv?access_token=query-secret',
+        },
         'SCHEDULED',
         { token: 1n, isActive: () => true },
       );
@@ -707,7 +768,9 @@ describe('LandDashboardService', () => {
       const successLog = (prisma.syncLog.create as jest.Mock).mock.calls
         .map(([args]) => args.data)
         .find(({ status }: { status: string }) => status === 'SUCCESS');
-      expect(successLog.sheetUrl).not.toContain('private-token');
+      expect(successLog.sheetUrl).not.toContain('path-secret');
+      expect(successLog.sheetUrl).not.toContain('query-secret');
+      expect(successLog.sheetUrl).toContain('/redacted');
       expect(successLog.sheetUrl).toContain('REDACTED');
     } finally {
       fetchSpy.mockRestore();

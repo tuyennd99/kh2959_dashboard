@@ -15,6 +15,10 @@ export class SheetSyncLockService {
     tx: Prisma.TransactionClient,
     lease: Pick<SyncLease, 'token'>,
   ): Promise<void> {
+    const schema = this.getDatabaseSchema();
+    await tx.$queryRaw`
+      SELECT set_config('search_path', quote_ident(${schema}), true)
+    `;
     const rows = await tx.$queryRaw<Array<{ token: bigint }>>`
       SELECT token FROM sheet_sync_leases WHERE id = 'sheet-sync' FOR UPDATE
     `;
@@ -38,7 +42,10 @@ export class SheetSyncLockService {
 
     try {
       await client.connect();
-      await client.query("SELECT set_config('search_path', $1, false)", [schema]);
+      await client.query(
+        "SELECT set_config('search_path', quote_ident($1), false)",
+        [schema],
+      );
       await client.query("SELECT set_config('statement_timeout', $1, false)", ['5000']);
       // ponytail: one lock serializes every Sheet write; split by source only if sync throughput needs it.
       const lock = await client.query<{ acquired: boolean }>(
@@ -107,7 +114,9 @@ export class SheetSyncLockService {
       database.password === lock.password &&
       databaseSchema === lockSchema;
     if (!sameDatabase) {
-      throw new Error('SHEET_SYNC_LOCK_DATABASE_URL must target DATABASE_URL');
+      throw new Error(
+        'SHEET_SYNC_LOCK_DATABASE_URL must use the same connection endpoint and database as DATABASE_URL',
+      );
     }
 
     lock.searchParams.delete('schema');
@@ -119,5 +128,11 @@ export class SheetSyncLockService {
     }
 
     return { connectionString: lock.toString(), schema: lockSchema };
+  }
+
+  private getDatabaseSchema(): string {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new Error('DATABASE_URL is required');
+    return new URL(databaseUrl).searchParams.get('schema') ?? 'public';
   }
 }
