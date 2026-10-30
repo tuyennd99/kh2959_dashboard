@@ -224,7 +224,11 @@ describe("LandDashboardService PostgreSQL integration", () => {
         ).toBe(2);
         expect(
           await prisma.syncLog.count({
-            where: { source: "SHEET_MODULES", status: "SUCCESS" },
+            where: {
+              source: "SHEET_MODULES",
+              status: "SUCCESS",
+              id: { not: "SHEET_MODULES_STATE" },
+            },
           }),
         ).toBe(2);
         expect(
