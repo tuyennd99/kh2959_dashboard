@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-29-dong-bo-excel-hang-ngay-design.md`.
 
-**Trạng thái:** Đã triển khai trên nhánh `codex/sync-google-sheet`. Backend unit test 45/45, typecheck và build PASS. Hai bộ test tích hợp PostgreSQL chưa chạy được ở lần kiểm tra cuối vì kết nối tới database cấu hình trả `ECONNREFUSED`; không dùng schema ứng dụng thật cho fixture có xóa dữ liệu.
+**Trạng thái:** Đã gộp vào `main`. Backend unit test 47/47, PostgreSQL integration 6/6 trên schema thử nghiệm tạm và typecheck PASS; build PASS trên nhánh tính năng trước khi gộp. `.env` chưa có `SHEET_SYNC_LOCK_DATABASE_URL`, nên lần integration dùng `DATABASE_URL` làm URL khóa tạm thời trong tiến trình test; file cấu hình không bị thay đổi.
 
 ## Global Constraints
 
@@ -277,9 +277,9 @@ Ghi một log kết quả tổng riêng `source='SHEET_DAILY'` với `SUCCESS`/`
 
 **Interfaces:** Không bổ sung endpoint hoặc thay đổi giao diện người dùng. Cấu hình server là nguồn cron; link chỉnh trong form quản lý chỉ áp dụng lượt thủ công.
 
-- [ ] **Bước 1: Viết kịch bản tích hợp.** Người dùng yêu cầu dùng PostgreSQL đang cấu hình. Không chạy fixture có thể ghi/xóa bản ghi dashboard trên schema ứng dụng thật. Nếu chạy các kiểm tra dữ liệu tích hợp, tạo một schema thử nghiệm tạm trong cùng database, đồng bộ Prisma schema vào schema đó rồi xóa đúng schema tạm sau kiểm tra; nếu không đủ quyền, ghi rõ phần này chưa chạy. Fixture kiểm tra hai lượt chạy ngày liên tiếp, cập nhật/xóa đúng bản ghi, cache đủ ba báo cáo, contention giữa hai instance với cron/thủ công/refresh, rollback khi ghi log thành công lỗi và giữ cache cũ khi update lỗi. Test fixture cần chạy trên schema tạm; ở lần chạy cuối PostgreSQL trả `ECONNREFUSED`, nên chưa xác nhận các nhánh này bằng database thật.
+- [ ] **Bước 1: Viết kịch bản tích hợp.** Người dùng yêu cầu dùng PostgreSQL đang cấu hình. Không chạy fixture có thể ghi/xóa bản ghi dashboard trên schema ứng dụng thật. Tạo schema thử nghiệm tạm trong cùng database, đồng bộ Prisma schema, chạy fixture kiểm tra hai lượt hằng ngày, cập nhật/xóa đúng bản ghi, cache đủ ba báo cáo, contention giữa hai instance với cron/thủ công/refresh, rollback và giữ cache cũ khi update lỗi; sau đó xóa đúng schema tạm. Lần chạy lại hoàn tất thành công.
 
-- [ ] **Bước 2: Chạy kịch bản lỗi.** Unit test bao phủ nguồn sai định dạng, dòng dữ liệu 0/0, lỗi ghi log thành công cần rollback, lỗi metadata, contention và fencing token cũ. Integration test bổ sung rollback nhóm chính, giữ cache phụ khi ghi lỗi, hai lượt lặp và tranh chấp thật giữa hai kết nối. Kiểm tra tích hợp chưa chạy được do `ECONNREFUSED`; không tính suite bị skip là PASS.
+- [ ] **Bước 2: Chạy kịch bản lỗi.** Unit test bao phủ nguồn sai định dạng, dòng dữ liệu 0/0, lỗi ghi log thành công cần rollback, lỗi metadata, contention và fencing token cũ. Integration test bao phủ rollback nhóm chính, giữ cache phụ khi ghi lỗi, hai lượt lặp và tranh chấp thật giữa hai kết nối; cả 6 bài tích hợp đạt trên schema thử nghiệm tạm.
 
 - [ ] **Bước 3: Ghi cấu hình vận hành.** Trong `.env.example`, thêm `SHEET_SYNC_LOCK_DATABASE_URL` với cùng ví dụ PostgreSQL cục bộ, không chứa credential thật; bổ sung ví dụ cho các biến URL còn thiếu. Trong `README.md`, ghi: lịch 02:00 Việt Nam; yêu cầu PostgreSQL direct/session pooling và backend chạy liên tục; không tự chạy bù; cách xem log `SHEET_DAILY`/`SHEET_SYNC`/`SHEET_MODULES`; cách chạy lại bằng trang quản lý; URL form không lưu cấu hình cron; sao lưu và thử trước khi bật.
 
@@ -291,7 +291,7 @@ pnpm --filter @land/api typecheck
 pnpm --filter @land/api build
 ```
 
-Chạy bài test khóa bằng `DATABASE_URL` và `SHEET_SYNC_LOCK_DATABASE_URL` theo yêu cầu người dùng; bài này chỉ đổi token trong bảng khóa. Chạy riêng test dữ liệu tích hợp trên schema thử nghiệm tạm trong cùng database nếu quyền cho phép. Lần chạy cuối trả `ECONNREFUSED`; backend unit test đạt 45/45, còn hai suite tích hợp chưa chạy. Test bị skip không chứng minh khóa hoặc rollback hoạt động.
+Chạy unit suite: 47 test đạt; hai suite DB được bỏ qua khi không bật schema thử nghiệm. Chạy riêng cả hai suite tích hợp trên schema thử nghiệm tạm: 6/6 đạt; schema được xóa sau khi chạy. Chạy typecheck PASS. Build PASS trước khi gộp. `.env` không có URL khóa riêng nên test chỉ dùng bản sao tạm của `DATABASE_URL` trong tiến trình runner; cần cấu hình biến đó ở môi trường chạy backend trước khi bật cron.
 
 - [ ] **Bước 5: Kiểm tra diff và commit tài liệu vận hành.** Không stage các thay đổi có trước của người dùng. Không bật hoặc triển khai cron chỉ vì test đã PASS; xác nhận các quyết định ở đầu kế hoạch trước khi bật.
 
