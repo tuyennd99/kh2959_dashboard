@@ -79,3 +79,10 @@ model SyncLog {
   @@index([syncedAt])
   @@map("sync_logs")
 }
+
+model SheetSyncLease {
+  id    String @id @db.VarChar(60)
+  token BigInt @default(0)
+
+  @@map("sheet_sync_leases")
+}

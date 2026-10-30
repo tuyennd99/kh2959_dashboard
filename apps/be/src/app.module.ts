@@ -9,6 +9,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PrismaService } from './prisma/prisma.service';
 import { AuthService } from './services/auth.service';
 import { LandDashboardService } from './services/land-dashboard.service';
+import { SheetSyncLockService } from './services/sheet-sync-lock.service';
 
 @Module({
   imports: [JwtModule.register({})],
@@ -22,6 +23,7 @@ import { LandDashboardService } from './services/land-dashboard.service';
     PrismaService,
     AuthService,
     LandDashboardService,
+    SheetSyncLockService,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
