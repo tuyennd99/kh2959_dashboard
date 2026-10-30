@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-29-dong-bo-excel-hang-ngay-design.md`.
 
-**Trạng thái:** Đã triển khai trên nhánh `codex/sync-google-sheet`. Test backend 38/38, typecheck và build PASS. Hai bộ test tích hợp PostgreSQL chưa chạy được ở lần kiểm tra cuối vì database trả `ECONNREFUSED`; test khóa trên database cấu hình đã PASS trước đó.
+**Trạng thái:** Đã triển khai trên nhánh `codex/sync-google-sheet`. Backend unit test 45/45, typecheck và build PASS. Hai bộ test tích hợp PostgreSQL chưa chạy được ở lần kiểm tra cuối vì kết nối tới database cấu hình trả `ECONNREFUSED`; không dùng schema ứng dụng thật cho fixture có xóa dữ liệu.
 
 ## Global Constraints
 
@@ -21,6 +21,7 @@
 - Không xóa `SPATIAL_PARCELS`. Bảo toàn tùy chọn `replaceExisting` của thao tác thủ công và hợp đồng API hiện có, trừ trạng thái lỗi cần phản ánh trung thực.
 - Bốn nguồn phải có ít nhất một dòng dữ liệu hợp lệ. Nếu một nguồn phụ lỗi, giữ nguyên `SHEET_MODULES_STATE` gần nhất; Sheet chính và nhóm phụ xử lý độc lập.
 - Chỉ khi cả hai nhóm thành công mới coi lượt chạy hoàn toàn thành công. Không ghi token hoặc URL chứa thông tin xác thực vào log.
+- `SHEET_SYNC_LOCK_DATABASE_URL` phải trùng giao thức, host, cổng, database, tài khoản và schema với `DATABASE_URL`; cả hai dùng PostgreSQL trực tiếp hoặc pooler chế độ session, không dùng transaction pooling.
 - Lấy dữ liệu mạng ngoài transaction cơ sở dữ liệu; chặn đồng thời các thao tác ghi Sheet trên mọi instance, kể cả sync thủ công và refresh module công khai.
 - Trước khi bật cron production: xác nhận nguồn URL, môi trường chạy liên tục, kết nối PostgreSQL trực tiếp, sao lưu và chạy thử trên môi trường kiểm thử.
 - Repo hiện có thay đổi chưa commit. Không hoàn tác hoặc đưa các thay đổi không liên quan vào commit.
@@ -107,7 +108,7 @@ model SheetSyncLease {
 ```
 
 - [ ] **Bước 4: Thực hiện khóa có fencing.** Tạo `SheetSyncLockService` và đăng ký provider trong `AppModule`:
-  1. Dùng `pg.Client` và biến `SHEET_SYNC_LOCK_DATABASE_URL` trỏ trực tiếp PostgreSQL hoặc pooler ở chế độ session, không dùng transaction pooling. Nếu biến thiếu, cả cron và thao tác ghi Sheet thủ công phải báo lỗi cấu hình; không âm thầm chạy không khóa. Sao chép cách xử lý `sslmode=require`/`uselibpqcompat` trong `apps/be/src/prisma/client.ts`; lấy tham số `schema` trước khi loại khỏi URL và đặt `search_path` bằng `SELECT set_config('search_path', $1, false)` trên kết nối. Mặc định schema là `public` nếu không được chỉ định. Khóa và `DATABASE_URL` phải trỏ đến cùng database và cùng schema; kiểm tra cấu hình trước khi bật lịch.
+  1. Dùng `pg.Client` và biến `SHEET_SYNC_LOCK_DATABASE_URL` trỏ trực tiếp PostgreSQL hoặc pooler ở chế độ session, không dùng transaction pooling. Nếu biến thiếu, cả cron và thao tác ghi Sheet thủ công phải báo lỗi cấu hình; không âm thầm chạy không khóa. Sao chép cách xử lý `sslmode=require`/`uselibpqcompat` trong `apps/be/src/prisma/client.ts`; lấy tham số `schema` trước khi loại khỏi URL và đặt `search_path` bằng `SELECT set_config('search_path', quote_ident($1), false)` trên kết nối. Mặc định schema là `public` nếu không được chỉ định. Khóa và `DATABASE_URL` phải trùng giao thức, host, cổng, database, tài khoản và schema; kiểm tra cấu hình trước khi bật lịch.
   2. Trên kết nối riêng, gọi `SELECT pg_try_advisory_lock(hashtext('land-sheet-sync-v1'), 1) AS acquired`. Dùng overload hai số nguyên của PostgreSQL; overload một tham số nhận `bigint`, trong khi `hashtext` trả `integer`. Nếu `false`, đóng kết nối và trả `null`. Không giữ transaction mở khi tải HTTP.
   3. Sau khi lấy khóa phiên, dùng **transaction trên chính kết nối `pg.Client` đang giữ khóa**: `INSERT` hàng `id='sheet-sync'` nếu thiếu, rồi `UPDATE ... SET token=token+1 ... RETURNING token` và commit. Kết nối mất giữa chừng khiến transaction rollback; không thể cấp token khi không còn giữ khóa. Chỉ callback sở hữu token này mới được ghi. Khóa phiên và `sheet_sync_leases` phải cùng database và schema với Prisma.
   4. `assertCurrentSheetSyncLease` dùng cùng transaction ghi: `SELECT token FROM sheet_sync_leases WHERE id = 'sheet-sync' FOR UPDATE`; nếu token khác hoặc thiếu thì ném `Error('Sheet sync lease expired')`. Giữ row lock đến khi transaction kết thúc. Chủ mới tăng token phải chờ transaction ghi trước đó hoàn tất; callback cũ không thể ghi sau khi token mới được cấp.
@@ -276,9 +277,9 @@ Ghi một log kết quả tổng riêng `source='SHEET_DAILY'` với `SUCCESS`/`
 
 **Interfaces:** Không bổ sung endpoint hoặc thay đổi giao diện người dùng. Cấu hình server là nguồn cron; link chỉnh trong form quản lý chỉ áp dụng lượt thủ công.
 
-- [ ] **Bước 1: Viết kịch bản tích hợp.** Người dùng yêu cầu dùng PostgreSQL đang cấu hình. Không chạy fixture có thể ghi/xóa bản ghi dashboard trên schema ứng dụng thật. Nếu chạy các kiểm tra dữ liệu tích hợp, tạo một schema thử nghiệm tạm trong cùng database, đồng bộ Prisma schema vào schema đó rồi xóa đúng schema tạm sau kiểm tra; nếu không đủ quyền, ghi rõ phần này chưa chạy. Mock bốn HTTP response bằng fixture hợp lệ; khởi tạo hai service đại diện hai instance. Trong khi cron đang nắm khóa, gọi đồng bộ thủ công và refresh module: cả hai phải nhận HTTP 409, không ghi dữ liệu. Sau khi thả khóa, xác nhận thủ công chạy được. Kiểm tra số lượt fetch là bốn và cache bao gồm cả ba báo cáo.
+- [ ] **Bước 1: Viết kịch bản tích hợp.** Người dùng yêu cầu dùng PostgreSQL đang cấu hình. Không chạy fixture có thể ghi/xóa bản ghi dashboard trên schema ứng dụng thật. Nếu chạy các kiểm tra dữ liệu tích hợp, tạo một schema thử nghiệm tạm trong cùng database, đồng bộ Prisma schema vào schema đó rồi xóa đúng schema tạm sau kiểm tra; nếu không đủ quyền, ghi rõ phần này chưa chạy. Fixture kiểm tra hai lượt chạy ngày liên tiếp, cập nhật/xóa đúng bản ghi, cache đủ ba báo cáo, contention giữa hai instance với cron/thủ công/refresh, rollback khi ghi log thành công lỗi và giữ cache cũ khi update lỗi. Test fixture cần chạy trên schema tạm; ở lần chạy cuối PostgreSQL trả `ECONNREFUSED`, nên chưa xác nhận các nhánh này bằng database thật.
 
-- [ ] **Bước 2: Chạy kịch bản lỗi.** Thực hiện từng trường hợp: 1) một nguồn phụ HTTP 500, Sheet chính thành công; 2) Sheet chính sai định dạng, ba nguồn phụ thành công; 3) log thành công gặp lỗi DB làm rollback nhóm tương ứng; 4) chấm dứt kết nối giữ khóa giữa hai nhóm; 5) hai lượt liên tiếp với cùng dữ liệu. Kiểm tra trạng thái từng nhóm/tổng, dữ liệu/cache, fencing token và khả năng lấy khóa sau lỗi. Chỉ chạy thao tác ghi/xóa dữ liệu trên schema thử nghiệm tạm; không chạy fixture trên schema ứng dụng thật.
+- [ ] **Bước 2: Chạy kịch bản lỗi.** Unit test bao phủ nguồn sai định dạng, dòng dữ liệu 0/0, lỗi ghi log thành công cần rollback, lỗi metadata, contention và fencing token cũ. Integration test bổ sung rollback nhóm chính, giữ cache phụ khi ghi lỗi, hai lượt lặp và tranh chấp thật giữa hai kết nối. Kiểm tra tích hợp chưa chạy được do `ECONNREFUSED`; không tính suite bị skip là PASS.
 
 - [ ] **Bước 3: Ghi cấu hình vận hành.** Trong `.env.example`, thêm `SHEET_SYNC_LOCK_DATABASE_URL` với cùng ví dụ PostgreSQL cục bộ, không chứa credential thật; bổ sung ví dụ cho các biến URL còn thiếu. Trong `README.md`, ghi: lịch 02:00 Việt Nam; yêu cầu PostgreSQL direct/session pooling và backend chạy liên tục; không tự chạy bù; cách xem log `SHEET_DAILY`/`SHEET_SYNC`/`SHEET_MODULES`; cách chạy lại bằng trang quản lý; URL form không lưu cấu hình cron; sao lưu và thử trước khi bật.
 
@@ -290,7 +291,7 @@ pnpm --filter @land/api typecheck
 pnpm --filter @land/api build
 ```
 
-Chạy bài test khóa bằng `DATABASE_URL` và `SHEET_SYNC_LOCK_DATABASE_URL` theo yêu cầu người dùng; bài này chỉ đổi token trong bảng khóa. Chạy riêng test dữ liệu tích hợp trên schema thử nghiệm tạm trong cùng database nếu quyền cho phép. Ghi rõ test nào không chạy được và lý do; test bị skip không chứng minh khóa hoặc rollback hoạt động.
+Chạy bài test khóa bằng `DATABASE_URL` và `SHEET_SYNC_LOCK_DATABASE_URL` theo yêu cầu người dùng; bài này chỉ đổi token trong bảng khóa. Chạy riêng test dữ liệu tích hợp trên schema thử nghiệm tạm trong cùng database nếu quyền cho phép. Lần chạy cuối trả `ECONNREFUSED`; backend unit test đạt 45/45, còn hai suite tích hợp chưa chạy. Test bị skip không chứng minh khóa hoặc rollback hoạt động.
 
 - [ ] **Bước 5: Kiểm tra diff và commit tài liệu vận hành.** Không stage các thay đổi có trước của người dùng. Không bật hoặc triển khai cron chỉ vì test đã PASS; xác nhận các quyết định ở đầu kế hoạch trước khi bật.
 
