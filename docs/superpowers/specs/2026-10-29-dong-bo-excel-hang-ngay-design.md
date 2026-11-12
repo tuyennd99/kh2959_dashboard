@@ -1,5 +1,7 @@
 # Dự thảo thiết kế: đồng bộ dữ liệu bảng tính hằng ngày
 
+> Cập nhật 12/11/2026: lịch chuyển sang mỗi 5 phút; các mốc 02:00 bên dưới ghi lại thiết kế ban đầu.
+
 Ngày: 29/10/2026
 
 Trạng thái: đã xác nhận sử dụng ba liên kết Google Sheet hiện có, chạy 02:00 và xóa bản ghi nhập tay/CSV cũ không có trong Sheet. Đã triển khai trên nhánh `codex/sync-google-sheet`.

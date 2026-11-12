@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Cron } from "@nestjs/schedule";
+import { Cron, CronExpression } from "@nestjs/schedule";
 import { LandDashboardService } from "./land-dashboard.service";
 
 @Injectable()
@@ -8,7 +8,7 @@ export class SheetSyncSchedulerService {
 
   constructor(private readonly dashboard: LandDashboardService) {}
 
-  @Cron("0 2 * * *", {
+  @Cron(CronExpression.EVERY_5_MINUTES, {
     name: "daily-sheet-sync",
     timeZone: "Asia/Ho_Chi_Minh",
     waitForCompletion: true,
@@ -19,12 +19,12 @@ export class SheetSyncSchedulerService {
       if (!result)
         this.logger.warn("Bỏ qua: đang có lượt đồng bộ Google Sheet khác");
       else if (result.status === "FAILED") {
-        this.logger.error("Đồng bộ hằng ngày thất bại; xem SyncLog");
+        this.logger.error("Đồng bộ theo lịch thất bại; xem SyncLog");
       } else {
-        this.logger.log("Đồng bộ Google Sheet hằng ngày thành công");
+        this.logger.log("Đồng bộ Google Sheet theo lịch thành công");
       }
     } catch {
-      this.logger.error("Không thể chạy đồng bộ Google Sheet hằng ngày");
+      this.logger.error("Không thể chạy đồng bộ Google Sheet theo lịch");
     }
   }
 }

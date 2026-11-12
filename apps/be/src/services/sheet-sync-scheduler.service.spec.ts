@@ -3,14 +3,14 @@ import type { LandDashboardService } from "./land-dashboard.service";
 import { SheetSyncSchedulerService } from "./sheet-sync-scheduler.service";
 
 describe("SheetSyncSchedulerService", () => {
-  it("runs daily at 02:00 Vietnam time without overlapping in one instance", () => {
+  it("runs every five minutes without overlapping in one instance", () => {
     expect(
       Reflect.getMetadata(
         "SCHEDULE_CRON_OPTIONS",
         SheetSyncSchedulerService.prototype.syncDaily,
       ),
     ).toMatchObject({
-      cronTime: "0 2 * * *",
+      cronTime: "0 */5 * * * *",
       timeZone: "Asia/Ho_Chi_Minh",
       waitForCompletion: true,
     });
@@ -44,6 +44,12 @@ describe("SheetSyncSchedulerService", () => {
         "Bỏ qua: đang có lượt đồng bộ Google Sheet khác",
       );
       expect(loggerError).toHaveBeenCalledTimes(2);
+      expect(loggerError).toHaveBeenCalledWith(
+        "Đồng bộ theo lịch thất bại; xem SyncLog",
+      );
+      expect(loggerError).toHaveBeenCalledWith(
+        "Không thể chạy đồng bộ Google Sheet theo lịch",
+      );
     } finally {
       loggerWarn.mockRestore();
       loggerError.mockRestore();
@@ -65,7 +71,7 @@ describe("SheetSyncSchedulerService", () => {
       await scheduler.syncDaily();
       expect(dashboard.runDailySheetSync).toHaveBeenCalledTimes(1);
       expect(loggerLog).toHaveBeenCalledWith(
-        "Đồng bộ Google Sheet hằng ngày thành công",
+        "Đồng bộ Google Sheet theo lịch thành công",
       );
     } finally {
       loggerLog.mockRestore();

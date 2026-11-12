@@ -1,5 +1,7 @@
 # Đồng bộ Google Sheet hằng ngày Implementation Plan
 
+> Cập nhật 12/11/2026: lịch chuyển sang mỗi 5 phút; các mốc 02:00 bên dưới ghi lại kế hoạch ban đầu.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Tự động đồng bộ ba liên kết Google Sheet hiện có mỗi ngày, lấy số liệu từ Sheet và bảo toàn dữ liệu khi nguồn lỗi.

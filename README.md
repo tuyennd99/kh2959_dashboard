@@ -30,14 +30,14 @@ pnpm dev
 - **Email:** `admin@datdai.local`
 - **Mật khẩu:** `Admin@123456`
 
-## Đồng bộ Google Sheet hằng ngày
+## Đồng bộ Google Sheet tự động
 
-Backend tự đồng bộ lúc **02:00**, múi giờ `Asia/Ho_Chi_Minh`, khi tiến trình backend đang chạy. Lịch dùng bốn URL CSV cấu hình ở backend: `GOOGLE_SHEET_CSV_URL`, `TWO_TIER_SHEET_CSV_URL`, `VNLIS_SHEET_CSV_URL` và `POPULATION_SHEET_CSV_URL`. Hai URL cuối lấy dữ liệu từ hai tab trong cùng một file Google Sheet. Các URL nhập trên trang quản lý chỉ dùng cho lần đồng bộ thủ công.
+Backend tự đồng bộ **mỗi 5 phút**, khi tiến trình backend đang chạy. Lịch dùng bốn URL CSV cấu hình ở backend: `GOOGLE_SHEET_CSV_URL`, `TWO_TIER_SHEET_CSV_URL`, `VNLIS_SHEET_CSV_URL` và `POPULATION_SHEET_CSV_URL`. Hai URL cuối lấy dữ liệu từ hai tab trong cùng một file Google Sheet. Các URL nhập trên trang quản lý chỉ dùng cho lần đồng bộ thủ công.
 
 `SHEET_SYNC_LOCK_DATABASE_URL` phải dùng cùng giao thức, host, cổng, database, tài khoản và schema với `DATABASE_URL`. Vì khóa cần giữ nguyên một phiên kết nối, cả hai URL phải dùng PostgreSQL trực tiếp hoặc pooler chế độ session; không dùng transaction pooling. Cấu hình này giúp nhiều instance backend dùng chung một khóa.
 
-Lịch không chạy bù nếu backend ngừng hoạt động lúc 02:00. Mỗi nguồn phải có ít nhất một dòng hợp lệ. Nếu Sheet chính tải thành công, dữ liệu trùng khóa được cập nhật theo Sheet và các dòng `MANUAL`/`CSV_UPLOAD` vắng khỏi Sheet sẽ bị xóa; lịch sử `SHEET_SYNC` và `SPATIAL_PARCELS` được giữ. Ba bảng phụ chỉ thay cache khi cả ba nguồn tải và phân tích thành công.
+Lịch không chạy bù khi backend ngừng hoạt động; một lượt bị bỏ qua nếu lượt đồng bộ khác vẫn đang chạy. Mỗi nguồn phải có ít nhất một dòng hợp lệ. Nếu Sheet chính tải thành công, dữ liệu trùng khóa được cập nhật theo Sheet và các dòng `MANUAL`/`CSV_UPLOAD` vắng khỏi Sheet sẽ bị xóa; lịch sử `SHEET_SYNC` và `SPATIAL_PARCELS` được giữ. Ba bảng phụ chỉ thay cache khi cả ba nguồn tải và phân tích thành công.
 
 Trước khi bật lịch trên production lần đầu, hãy sao lưu PostgreSQL, xác nhận bốn URL CSV truy cập được từ backend và chạy thử nghiệp vụ trong schema tạm của cùng database.
 
-Xem kết quả tại lịch sử `SyncLog`: `SHEET_DAILY` là trạng thái tổng, `SHEET_SYNC` là Sheet chính và `SHEET_MODULES` là nhóm bảng phụ. Nếu một lượt thất bại, kiểm tra các URL server và log backend; có thể chạy lại đồng bộ từ trang quản lý.
+Xem kết quả tại lịch sử `SyncLog`: `SHEET_DAILY` là mã cũ được giữ cho trạng thái tổng của mỗi lượt theo lịch, `SHEET_SYNC` là Sheet chính và `SHEET_MODULES` là nhóm bảng phụ. Nếu một lượt thất bại, kiểm tra các URL server và log backend; có thể chạy lại đồng bộ từ trang quản lý.
