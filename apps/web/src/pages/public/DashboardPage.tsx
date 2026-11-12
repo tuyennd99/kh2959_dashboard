@@ -67,6 +67,8 @@ import {
   TabsTrigger,
 } from "../../components/ui/tabs";
 
+const SHOW_EXTERNAL_REPORT = false;
+
 export function DashboardPage() {
   const queryClient = useQueryClient();
   const [fromDate, setFromDate] = useState<string>("");
@@ -147,7 +149,7 @@ export function DashboardPage() {
       }
       return rows;
     },
-    enabled: Boolean(externalDates?.length),
+    enabled: SHOW_EXTERNAL_REPORT && Boolean(externalDates?.length),
   });
 
   const sheetModulesQuery = useQuery({
@@ -1293,7 +1295,10 @@ export function DashboardPage() {
         {/* =====================================================================
             KHỐI 5: TIẾN ĐỘ CHUẨN HÓA HỒ SƠ LƯU TRỮ (API CHUANHOA.MINHHUUB.ORG)
            ===================================================================== */}
-        <section className="space-y-3 border-t border-border pt-6">
+        <section
+          hidden={!SHOW_EXTERNAL_REPORT}
+          className="space-y-3 border-t border-border pt-6"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               {/* <ScanLine className="size-5 text-primary" /> */}
